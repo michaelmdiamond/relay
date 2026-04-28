@@ -2,6 +2,11 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+@keyframes blink {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0; }
+}
+
 /* ── Theme: Void (default — blue-tinted) ─────────────────────── */
 :root, [data-theme="void"] {
   --glass-app:     rgba(8, 8, 16, 0.78);
