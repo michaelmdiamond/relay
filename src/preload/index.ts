@@ -1,40 +1,38 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { IpcApi, Session } from '../shared/types'
+import type { ChatApi } from '../shared/types'
 
-const api: IpcApi = {
-  getEnv: () => ipcRenderer.invoke('get-env'),
-  getSessions: () => ipcRenderer.invoke('get-sessions'),
-  createSession: (name, cwd, project) => ipcRenderer.invoke('create-session', name, cwd, project),
-  attachSession: (pid, name, project) => ipcRenderer.invoke('attach-session', pid, name, project),
-  removeSession: (id) => ipcRenderer.invoke('remove-session', id),
-  updateSession: (id, patch) => ipcRenderer.invoke('update-session', id, patch),
-  killSession: (id) => ipcRenderer.invoke('kill-session', id),
-  writeToPty: (id, data) => ipcRenderer.invoke('write-pty', id, data),
-  resizePty: (id, cols, rows) => ipcRenderer.invoke('resize-pty', id, cols, rows),
+const api: ChatApi = {
+  getApiKeyStatus: () => ipcRenderer.invoke('get-api-key-status'),
+  setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),
+  getConversations: () => ipcRenderer.invoke('get-conversations'),
+  sendMessage: (conversationId, content, modelChoice) =>
+    ipcRenderer.invoke('send-message', conversationId, content, modelChoice),
+  newConversation: () => ipcRenderer.invoke('new-conversation'),
+  deleteConversation: (id) => ipcRenderer.invoke('delete-conversation', id),
 
-  onSessionsChanged: (cb: (sessions: Session[]) => void) => {
-    const listener = (_e: Electron.IpcRendererEvent, sessions: Session[]) => cb(sessions)
-    ipcRenderer.on('sessions-changed', listener)
-    return () => ipcRenderer.off('sessions-changed', listener)
+  getOpenAIAuthStatus: () => ipcRenderer.invoke('get-openai-auth-status'),
+  startOpenAILogin: () => ipcRenderer.invoke('start-openai-login'),
+  disconnectOpenAI: () => ipcRenderer.invoke('disconnect-openai'),
+
+  onChunk: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, convId: string, msgId: string, chunk: string) =>
+      cb(convId, msgId, chunk)
+    ipcRenderer.on('chat-chunk', listener)
+    return () => ipcRenderer.off('chat-chunk', listener)
   },
 
-  getClaudeConversations: () => ipcRenderer.invoke('get-claude-conversations'),
-  getClaudeMessages: (filePath: string) => ipcRenderer.invoke('get-claude-messages', filePath),
-  pinConversation: (conv, status) => ipcRenderer.invoke('pin-conversation', conv, status),
-  archiveConversation: (convId: string) => ipcRenderer.invoke('archive-conversation', convId),
-
-  onPtyData: (cb: (id: string, data: string) => void) => {
-    const listener = (_e: Electron.IpcRendererEvent, id: string, data: string) => cb(id, data)
-    ipcRenderer.on('pty-data', listener)
-    return () => ipcRenderer.off('pty-data', listener)
+  onMessageDone: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, convId: string, message: unknown) =>
+      cb(convId, message as never)
+    ipcRenderer.on('chat-message-done', listener)
+    return () => ipcRenderer.off('chat-message-done', listener)
   },
 
-  dismissAttention: (id: string) => ipcRenderer.invoke('dismiss-attention', id),
-
-  onFocusUrgentSession: (cb: (id: string) => void) => {
-    const listener = (_e: Electron.IpcRendererEvent, id: string) => cb(id)
-    ipcRenderer.on('focus-urgent-session', listener)
-    return () => ipcRenderer.off('focus-urgent-session', listener)
+  onError: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, convId: string, msgId: string, error: string) =>
+      cb(convId, msgId, error)
+    ipcRenderer.on('chat-error', listener)
+    return () => ipcRenderer.off('chat-error', listener)
   },
 }
 
