@@ -80,6 +80,10 @@ ipcMain.handle('send-message', (_e, conversationId: string, content: string, mod
       activeControllers.delete(conversationId)
       win?.webContents.send('chat-error', convId, msgId, error)
     },
+    cancel: (convId, msgId) => {
+      activeControllers.delete(conversationId)
+      win?.webContents.send('chat-canceled', convId, msgId)
+    },
   })
 })
 

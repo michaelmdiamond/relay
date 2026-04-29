@@ -49,6 +49,13 @@ const api: ChatApi = {
     ipcRenderer.on('chat-error', listener)
     return () => ipcRenderer.off('chat-error', listener)
   },
+
+  onCanceled: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, convId: string, msgId: string) =>
+      cb(convId, msgId)
+    ipcRenderer.on('chat-canceled', listener)
+    return () => ipcRenderer.off('chat-canceled', listener)
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

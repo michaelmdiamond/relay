@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ChatPane } from './components/ChatPane'
+import { TerminalsPane } from './components/TerminalsPane'
 import { ApiKeySetup } from './components/ApiKeySetup'
 import { useChatStore } from './store/chat'
 
 export default function App() {
   const [needsSetup, setNeedsSetup] = useState(false)
+  const [activeTab, setActiveTab] = useState<'chats' | 'terminals'>('chats')
   const { setConversations, setActiveId, prependConversation } = useChatStore()
 
   useEffect(() => {
@@ -43,24 +45,47 @@ export default function App() {
   }
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100vh',
-      overflow: 'hidden',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-      color: '#e2e8f0',
-    }}>
-      {/* Draggable title bar — sits above content, traffic lights overlap it */}
-      <div style={{
-        height: 40,
-        flexShrink: 0,
-        WebkitAppRegion: 'drag',
-      } as React.CSSProperties} />
+    <div className="app-shell">
+      <div className="toolbar">
+        <div className="toolbar-drag" />
+        <div className="toolbar-center">
+          <div className="seg-control" aria-label="App sections" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'chats'}
+              className={`seg-btn${activeTab === 'chats' ? ' active' : ''}`}
+              onClick={() => setActiveTab('chats')}
+            >
+              Chats
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'terminals'}
+              className={`seg-btn${activeTab === 'terminals' ? ' active' : ''}`}
+              onClick={() => setActiveTab('terminals')}
+            >
+              Terminal Sessions
+            </button>
+          </div>
+        </div>
+        <div className="toolbar-right">
+          <span className="toolbar-view-label">
+            {activeTab === 'chats' ? 'Chat mode' : 'Terminal mode'}
+          </span>
+        </div>
+      </div>
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <Sidebar onNew={handleNew} />
-        <ChatPane />
+      <div className="app-body">
+        {activeTab === 'chats' ? (
+          <>
+            <Sidebar onNew={handleNew} />
+            <ChatPane />
+          </>
+        ) : (
+          <TerminalsPane />
+        )}
       </div>
     </div>
   )

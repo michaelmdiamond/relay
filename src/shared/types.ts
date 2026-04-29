@@ -72,6 +72,7 @@ export interface ChatApi {
   onChunk: (cb: (conversationId: string, messageId: string, chunk: string) => void) => () => void
   onMessageDone: (cb: (conversationId: string, message: ChatMessage) => void) => () => void
   onError: (cb: (conversationId: string, messageId: string, error: string) => void) => () => void
+  onCanceled: (cb: (conversationId: string, messageId: string) => void) => () => void
 }
 
 declare global {
