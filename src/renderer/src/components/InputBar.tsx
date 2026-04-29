@@ -1,15 +1,19 @@
 import { useRef, useState } from 'react'
 import { ModelSelector } from './ModelSelector'
-import type { ModelChoice } from '../../../shared/types'
+import type { GeminiModel, ModelChoice } from '../../../shared/types'
 
 interface Props {
   modelChoice: ModelChoice
   onModelChange: (v: ModelChoice) => void
+  geminiModel?: GeminiModel
+  onGeminiModelChange?: (v: GeminiModel) => void
   onSend: (content: string) => void
+  onStop?: () => void
   disabled?: boolean
+  streaming?: boolean
 }
 
-export function InputBar({ modelChoice, onModelChange, onSend, disabled }: Props) {
+export function InputBar({ modelChoice, onModelChange, geminiModel, onGeminiModelChange, onSend, onStop, disabled, streaming }: Props) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -74,27 +78,53 @@ export function InputBar({ modelChoice, onModelChange, onSend, disabled }: Props
             overflowY: 'auto',
           }}
         />
-        <button
-          onClick={submit}
-          disabled={disabled || !text.trim()}
-          style={{
-            padding: '6px 14px',
-            borderRadius: 8,
-            border: 'none',
-            background: disabled || !text.trim() ? 'rgba(255,255,255,0.1)' : 'rgba(96,165,250,0.8)',
-            color: disabled || !text.trim() ? 'rgba(255,255,255,0.3)' : '#fff',
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: disabled || !text.trim() ? 'default' : 'pointer',
-            transition: 'all 0.15s',
-            flexShrink: 0,
-          }}
-        >
-          Send
-        </button>
+        {streaming ? (
+          <button
+            onClick={onStop}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 8,
+              border: 'none',
+              background: 'rgba(239,68,68,0.8)',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              flexShrink: 0,
+            }}
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={submit}
+            disabled={disabled || !text.trim()}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 8,
+              border: 'none',
+              background: disabled || !text.trim() ? 'rgba(255,255,255,0.1)' : 'rgba(96,165,250,0.8)',
+              color: disabled || !text.trim() ? 'rgba(255,255,255,0.3)' : '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: disabled || !text.trim() ? 'default' : 'pointer',
+              transition: 'all 0.15s',
+              flexShrink: 0,
+            }}
+          >
+            Send
+          </button>
+        )}
       </div>
       <div style={{ marginTop: 8, paddingLeft: 4 }}>
-        <ModelSelector value={modelChoice} onChange={onModelChange} disabled={disabled} />
+        <ModelSelector
+          value={modelChoice}
+          onChange={onModelChange}
+          geminiModel={geminiModel}
+          onGeminiModelChange={onGeminiModelChange}
+          disabled={disabled}
+        />
       </div>
     </div>
   )

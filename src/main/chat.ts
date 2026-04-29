@@ -7,7 +7,7 @@ import type { ChatMessage, Conversation, ModelChoice } from '../shared/types'
 import { route } from './router'
 import { isOpenAIConnected } from './openai-auth'
 import { streamCodexMessage } from './openai-codex'
-import { isGeminiConnected } from './gemini-auth'
+import { isGeminiConnected, getGeminiModel } from './gemini-auth'
 import { streamGeminiMessage } from './gemini'
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
@@ -102,7 +102,8 @@ export async function sendMessage(
   // Route — pass connection state for all free providers
   const { connected: openAIConnected } = isOpenAIConnected()
   const { connected: geminiConnected } = isGeminiConnected()
-  const routing = route(conv.messages, modelChoice, openAIConnected, geminiConnected)
+  const geminiModel = getGeminiModel()
+  const routing = route(conv.messages, modelChoice, openAIConnected, geminiConnected, geminiModel)
 
   // If routing to Anthropic but no key configured, bail early with a clear message
   if (routing.provider === 'anthropic' && !isApiKeyConfigured()) {
@@ -129,7 +130,10 @@ export async function sendMessage(
   const historyMessages = conv.messages.filter(m => m.id !== assistantId)
 
   if (routing.provider === 'openai' || routing.provider === 'google') {
-    const streamFn = routing.provider === 'google' ? streamGeminiMessage : streamCodexMessage
+    const streamFn = routing.provider === 'google'
+      ? (msgs: typeof historyMessages, e: Parameters<typeof streamGeminiMessage>[1], sig?: AbortSignal) =>
+          streamGeminiMessage(msgs, e, sig, routing.model as import('../shared/types').GeminiModel)
+      : streamCodexMessage
     await streamFn(historyMessages, {
       chunk: (text) => {
         if (signal.aborted) return

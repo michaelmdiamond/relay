@@ -1,8 +1,7 @@
-import { getGeminiApiKey } from './gemini-auth'
-import type { ChatMessage } from '../shared/types'
+import { getGeminiApiKey, getGeminiModel } from './gemini-auth'
+import type { ChatMessage, GeminiModel } from '../shared/types'
 
 const BASE = 'https://generativelanguage.googleapis.com'
-const MODEL = 'gemini-2.5-pro'
 
 function toGeminiContents(messages: ChatMessage[]): unknown[] {
   return messages.map(m => ({
@@ -18,13 +17,16 @@ export async function streamGeminiMessage(
     done: (fullText: string) => void
     error: (msg: string) => void
   },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  model?: GeminiModel
 ): Promise<void> {
   const apiKey = getGeminiApiKey()
   if (!apiKey) {
     emit.error('Gemini API key not configured')
     return
   }
+
+  const resolvedModel = model ?? getGeminiModel()
 
   const requestBody = {
     contents: toGeminiContents(messages),
@@ -35,7 +37,7 @@ export async function streamGeminiMessage(
   let res: Response
   try {
     res = await fetch(
-      `${BASE}/v1beta/models/${MODEL}:streamGenerateContent?alt=sse&key=${apiKey}`,
+      `${BASE}/v1beta/models/${resolvedModel}:streamGenerateContent?alt=sse&key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

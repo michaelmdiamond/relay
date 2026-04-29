@@ -7,7 +7,10 @@ export type AnthropicModel =
 
 export type CodexModel = 'gpt-5.3-codex'
 
-export type GeminiModel = 'gemini-2.5-pro'
+export type GeminiModel =
+  | 'gemini-2.5-pro'
+  | 'gemini-2.0-flash'
+  | 'gemini-2.0-flash-lite'
 
 export type AnyModel = AnthropicModel | CodexModel | GeminiModel
 
@@ -60,6 +63,8 @@ export interface ChatApi {
   getGeminiKeyStatus: () => Promise<{ configured: boolean }>
   setGeminiKey: (key: string) => Promise<void>
   disconnectGemini: () => Promise<void>
+  getGeminiModel: () => Promise<GeminiModel>
+  setGeminiModel: (model: GeminiModel) => Promise<void>
 
   cancelMessage: (conversationId: string) => Promise<void>
 

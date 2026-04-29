@@ -2,10 +2,13 @@ import { useState } from 'react'
 import type { RoutingDecision } from '../../../shared/types'
 
 const MODEL_COLOR: Record<string, string> = {
-  Haiku:  '#4ade80',
-  Sonnet: '#60a5fa',
-  Opus:   '#c084fc',
-  Codex:  '#f59e0b',
+  Haiku:            '#4ade80',
+  Sonnet:           '#60a5fa',
+  Opus:             '#c084fc',
+  Codex:            '#f59e0b',
+  'Gemini Pro':     '#34d399',
+  'Gemini Flash':   '#2dd4bf',
+  'Gemini Flash-Lite': '#5eead4',
 }
 
 export function RoutingBadge({ routing }: { routing: RoutingDecision }) {

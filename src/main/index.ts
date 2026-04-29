@@ -10,7 +10,8 @@ import {
 } from './chat'
 import { isOpenAIConnected, startLogin, clearCredentials } from './openai-auth'
 import { resetModelCache } from './openai-codex'
-import { isGeminiConnected, saveGeminiKey, disconnectGemini as clearGeminiCredentials } from './gemini-auth'
+import { isGeminiConnected, saveGeminiKey, disconnectGemini as clearGeminiCredentials, getGeminiModel, saveGeminiModel } from './gemini-auth'
+import type { GeminiModel } from '../shared/types'
 
 app.setName('Relay')
 nativeTheme.themeSource = 'dark'
@@ -57,6 +58,8 @@ ipcMain.handle('disconnect-openai', () => { clearCredentials(); resetModelCache(
 ipcMain.handle('get-gemini-key-status', () => isGeminiConnected())
 ipcMain.handle('set-gemini-key', (_e, key: string) => saveGeminiKey(key))
 ipcMain.handle('disconnect-gemini', () => clearGeminiCredentials())
+ipcMain.handle('get-gemini-model', () => getGeminiModel())
+ipcMain.handle('set-gemini-model', (_e, model: GeminiModel) => saveGeminiModel(model))
 
 const activeControllers = new Map<string, AbortController>()
 

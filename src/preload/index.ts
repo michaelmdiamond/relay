@@ -17,6 +17,8 @@ const api: ChatApi = {
   getGeminiKeyStatus: () => ipcRenderer.invoke('get-gemini-key-status'),
   setGeminiKey: (key) => ipcRenderer.invoke('set-gemini-key', key),
   disconnectGemini: () => ipcRenderer.invoke('disconnect-gemini'),
+  getGeminiModel: () => ipcRenderer.invoke('get-gemini-model'),
+  setGeminiModel: (model) => ipcRenderer.invoke('set-gemini-model', model),
 
   cancelMessage: (conversationId) => ipcRenderer.invoke('cancel-message', conversationId),
 
