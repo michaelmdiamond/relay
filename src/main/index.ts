@@ -10,6 +10,7 @@ import {
 } from './chat'
 import { isOpenAIConnected, startLogin, clearCredentials } from './openai-auth'
 import { resetModelCache } from './openai-codex'
+import { isGeminiConnected, saveGeminiKey, disconnectGemini as clearGeminiCredentials } from './gemini-auth'
 
 app.setName('Relay')
 nativeTheme.themeSource = 'dark'
@@ -53,12 +54,35 @@ ipcMain.handle('get-openai-auth-status', () => isOpenAIConnected())
 ipcMain.handle('start-openai-login', () => startLogin())
 ipcMain.handle('disconnect-openai', () => { clearCredentials(); resetModelCache() })
 
+ipcMain.handle('get-gemini-key-status', () => isGeminiConnected())
+ipcMain.handle('set-gemini-key', (_e, key: string) => saveGeminiKey(key))
+ipcMain.handle('disconnect-gemini', () => clearGeminiCredentials())
+
+const activeControllers = new Map<string, AbortController>()
+
 ipcMain.handle('send-message', (_e, conversationId: string, content: string, modelChoice: string) => {
-  sendMessage(conversationId, content, modelChoice as never, {
+  // Cancel any in-flight request for this conversation before starting a new one
+  activeControllers.get(conversationId)?.abort()
+  const controller = new AbortController()
+  activeControllers.set(conversationId, controller)
+
+  sendMessage(conversationId, content, modelChoice as never, controller.signal, {
+    streamStart: (convId, msgId, routing) => win?.webContents.send('chat-stream-start', convId, msgId, routing),
     chunk: (convId, msgId, chunk) => win?.webContents.send('chat-chunk', convId, msgId, chunk),
-    done: (convId, message) => win?.webContents.send('chat-message-done', convId, message),
-    error: (convId, msgId, error) => win?.webContents.send('chat-error', convId, msgId, error),
+    done: (convId, message) => {
+      activeControllers.delete(conversationId)
+      win?.webContents.send('chat-message-done', convId, message)
+    },
+    error: (convId, msgId, error) => {
+      activeControllers.delete(conversationId)
+      win?.webContents.send('chat-error', convId, msgId, error)
+    },
   })
+})
+
+ipcMain.handle('cancel-message', (_e, conversationId: string) => {
+  activeControllers.get(conversationId)?.abort()
+  activeControllers.delete(conversationId)
 })
 
 // ── App lifecycle ─────────────────────────────────────────────────

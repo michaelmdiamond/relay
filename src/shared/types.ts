@@ -1,4 +1,4 @@
-export type ModelChoice = 'auto' | 'haiku' | 'sonnet' | 'opus' | 'codex'
+export type ModelChoice = 'auto' | 'haiku' | 'sonnet' | 'opus' | 'codex' | 'gemini'
 
 export type AnthropicModel =
   | 'claude-haiku-4-5-20251001'
@@ -7,9 +7,11 @@ export type AnthropicModel =
 
 export type CodexModel = 'gpt-5.3-codex'
 
-export type AnyModel = AnthropicModel | CodexModel
+export type GeminiModel = 'gemini-2.5-pro'
 
-export type Provider = 'anthropic' | 'openai'
+export type AnyModel = AnthropicModel | CodexModel | GeminiModel
+
+export type Provider = 'anthropic' | 'openai' | 'google'
 
 export interface RoutingDecision {
   model: AnyModel
@@ -55,6 +57,13 @@ export interface ChatApi {
   startOpenAILogin: () => Promise<void>
   disconnectOpenAI: () => Promise<void>
 
+  getGeminiKeyStatus: () => Promise<{ configured: boolean }>
+  setGeminiKey: (key: string) => Promise<void>
+  disconnectGemini: () => Promise<void>
+
+  cancelMessage: (conversationId: string) => Promise<void>
+
+  onStreamStart: (cb: (conversationId: string, messageId: string, routing: RoutingDecision) => void) => () => void
   onChunk: (cb: (conversationId: string, messageId: string, chunk: string) => void) => () => void
   onMessageDone: (cb: (conversationId: string, message: ChatMessage) => void) => () => void
   onError: (cb: (conversationId: string, messageId: string, error: string) => void) => () => void

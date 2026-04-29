@@ -10,11 +10,12 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
-      const [anthropic, openai] = await Promise.all([
+      const [anthropic, openai, gemini] = await Promise.all([
         window.api.getApiKeyStatus(),
         window.api.getOpenAIAuthStatus(),
+        window.api.getGeminiKeyStatus(),
       ])
-      if (!anthropic.configured && !openai.connected) {
+      if (!anthropic.configured && !openai.connected && !gemini.configured) {
         setNeedsSetup(true)
         return
       }

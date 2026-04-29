@@ -14,6 +14,19 @@ const api: ChatApi = {
   startOpenAILogin: () => ipcRenderer.invoke('start-openai-login'),
   disconnectOpenAI: () => ipcRenderer.invoke('disconnect-openai'),
 
+  getGeminiKeyStatus: () => ipcRenderer.invoke('get-gemini-key-status'),
+  setGeminiKey: (key) => ipcRenderer.invoke('set-gemini-key', key),
+  disconnectGemini: () => ipcRenderer.invoke('disconnect-gemini'),
+
+  cancelMessage: (conversationId) => ipcRenderer.invoke('cancel-message', conversationId),
+
+  onStreamStart: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, convId: string, msgId: string, routing: unknown) =>
+      cb(convId, msgId, routing as never)
+    ipcRenderer.on('chat-stream-start', listener)
+    return () => ipcRenderer.off('chat-stream-start', listener)
+  },
+
   onChunk: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, convId: string, msgId: string, chunk: string) =>
       cb(convId, msgId, chunk)

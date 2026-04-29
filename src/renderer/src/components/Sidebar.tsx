@@ -9,28 +9,37 @@ interface Props {
 export function Sidebar({ onNew }: Props) {
   const { conversations, activeId, setActiveId, removeConversation } = useChatStore()
   const [openAIEmail, setOpenAIEmail] = useState<string | null>(null)
-  const [connecting, setConnecting] = useState(false)
+  const [connectingOpenAI, setConnectingOpenAI] = useState(false)
+  const [geminiConfigured, setGeminiConfigured] = useState(false)
 
   useEffect(() => {
     window.api.getOpenAIAuthStatus().then(({ connected, email }) => {
       setOpenAIEmail(connected ? (email ?? 'Connected') : null)
     })
+    window.api.getGeminiKeyStatus().then(({ configured }) => {
+      setGeminiConfigured(configured)
+    })
   }, [])
 
   async function handleConnectOpenAI() {
-    setConnecting(true)
+    setConnectingOpenAI(true)
     try {
       await window.api.startOpenAILogin()
       const { connected, email } = await window.api.getOpenAIAuthStatus()
       setOpenAIEmail(connected ? (email ?? 'Connected') : null)
     } finally {
-      setConnecting(false)
+      setConnectingOpenAI(false)
     }
   }
 
   async function handleDisconnectOpenAI() {
     await window.api.disconnectOpenAI()
     setOpenAIEmail(null)
+  }
+
+  async function handleDisconnectGemini() {
+    await window.api.disconnectGemini()
+    setGeminiConfigured(false)
   }
 
   async function handleDelete(e: React.MouseEvent, id: string) {
@@ -121,52 +130,59 @@ export function Sidebar({ onNew }: Props) {
         ))}
       </div>
 
-      {/* OpenAI connection footer */}
+      {/* Provider connection footer */}
       <div style={{
         padding: '8px 12px 12px',
         borderTop: '1px solid rgba(255,255,255,0.06)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
       }}>
+        {/* OpenAI */}
         {openAIEmail ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', flexShrink: 0 }} />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', flexShrink: 0 }} />
               <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {openAIEmail}
               </span>
             </div>
-            <button
-              onClick={handleDisconnectOpenAI}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'rgba(255,255,255,0.25)',
-                fontSize: 11,
-                cursor: 'pointer',
-                textAlign: 'left',
-                padding: 0,
-              }}
-            >
+            <button onClick={handleDisconnectOpenAI} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.25)', fontSize: 11, cursor: 'pointer', textAlign: 'left', padding: 0 }}>
               Disconnect OpenAI
             </button>
           </div>
         ) : (
           <button
             onClick={handleConnectOpenAI}
-            disabled={connecting}
+            disabled={connectingOpenAI}
             style={{
-              width: '100%',
-              padding: '6px 10px',
-              borderRadius: 7,
-              border: '1px solid rgba(245,158,11,0.25)',
-              background: 'rgba(245,158,11,0.08)',
-              color: connecting ? 'rgba(255,255,255,0.3)' : 'rgba(245,158,11,0.8)',
-              fontSize: 12,
-              cursor: connecting ? 'default' : 'pointer',
-              textAlign: 'left',
+              width: '100%', padding: '6px 10px', borderRadius: 7,
+              border: '1px solid rgba(245,158,11,0.25)', background: 'rgba(245,158,11,0.08)',
+              color: connectingOpenAI ? 'rgba(255,255,255,0.3)' : 'rgba(245,158,11,0.8)',
+              fontSize: 12, cursor: connectingOpenAI ? 'default' : 'pointer', textAlign: 'left',
             }}
           >
-            {connecting ? 'Opening browser…' : 'Connect OpenAI (Codex)'}
+            {connectingOpenAI ? 'Opening browser…' : 'Connect OpenAI (Codex)'}
           </button>
+        )}
+
+        {/* Gemini */}
+        {geminiConfigured ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
+                Gemini connected
+              </span>
+            </div>
+            <button onClick={handleDisconnectGemini} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.25)', fontSize: 11, cursor: 'pointer', textAlign: 'left', padding: 0 }}>
+              Disconnect Gemini
+            </button>
+          </div>
+        ) : (
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', padding: '2px 0' }}>
+            Gemini not connected
+          </div>
         )}
       </div>
     </div>

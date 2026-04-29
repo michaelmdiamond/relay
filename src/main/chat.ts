@@ -7,6 +7,8 @@ import type { ChatMessage, Conversation, ModelChoice } from '../shared/types'
 import { route } from './router'
 import { isOpenAIConnected } from './openai-auth'
 import { streamCodexMessage } from './openai-codex'
+import { isGeminiConnected } from './gemini-auth'
+import { streamGeminiMessage } from './gemini'
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
 const STORE_PATH = path.join(app.getPath('userData'), 'conversations.json')
@@ -80,7 +82,9 @@ export async function sendMessage(
   conversationId: string,
   content: string,
   modelChoice: ModelChoice,
+  signal: AbortSignal,
   emit: {
+    streamStart: (convId: string, msgId: string, routing: ChatMessage['routing']) => void
     chunk: (convId: string, msgId: string, chunk: string) => void
     done: (convId: string, message: ChatMessage) => void
     error: (convId: string, msgId: string, error: string) => void
@@ -95,9 +99,10 @@ export async function sendMessage(
   }))
   if (!conv) return
 
-  // Route — pass whether OpenAI is connected so auto-router can use Codex
+  // Route — pass connection state for all free providers
   const { connected: openAIConnected } = isOpenAIConnected()
-  const routing = route(conv.messages, modelChoice, openAIConnected)
+  const { connected: geminiConnected } = isGeminiConnected()
+  const routing = route(conv.messages, modelChoice, openAIConnected, geminiConnected)
 
   // If routing to Anthropic but no key configured, bail early with a clear message
   if (routing.provider === 'anthropic' && !isApiKeyConfigured()) {
@@ -117,12 +122,19 @@ export async function sendMessage(
   }
   conv = updateConversation(conversationId, c => ({ ...c, messages: [...c.messages, placeholder] }))!
 
+  // Tell the renderer to create the streaming placeholder immediately
+  emit.streamStart(conversationId, assistantId, routing)
+
   // Build message history excluding the empty placeholder
   const historyMessages = conv.messages.filter(m => m.id !== assistantId)
 
-  if (routing.provider === 'openai') {
-    await streamCodexMessage(historyMessages, {
-      chunk: (text) => emit.chunk(conversationId, assistantId, text),
+  if (routing.provider === 'openai' || routing.provider === 'google') {
+    const streamFn = routing.provider === 'google' ? streamGeminiMessage : streamCodexMessage
+    await streamFn(historyMessages, {
+      chunk: (text) => {
+        if (signal.aborted) return
+        emit.chunk(conversationId, assistantId, text)
+      },
       done: (fullText) => {
         const finalMsg: ChatMessage = {
           id: assistantId,
@@ -138,13 +150,14 @@ export async function sendMessage(
         emit.done(conversationId, finalMsg)
       },
       error: (msg) => {
+        if (signal.aborted) return
         updateConversation(conversationId, c => ({
           ...c,
           messages: c.messages.filter(m => m.id !== assistantId),
         }))
         emit.error(conversationId, assistantId, msg)
       },
-    })
+    }, signal)
     return
   }
 
@@ -160,11 +173,12 @@ export async function sendMessage(
       model: routing.model as import('../shared/types').AnthropicModel,
       max_tokens: 4096,
       messages: apiMessages,
-    })
+    }, { signal })
 
     let accumulated = ''
 
     stream.on('text', (text) => {
+      if (signal.aborted) return
       accumulated += text
       emit.chunk(conversationId, assistantId, text)
     })
@@ -186,6 +200,7 @@ export async function sendMessage(
 
     emit.done(conversationId, finalMsg)
   } catch (err: unknown) {
+    if ((err as { name?: string })?.name === 'AbortError') return
     const msg = err instanceof Error ? err.message : String(err)
     updateConversation(conversationId, c => ({
       ...c,
