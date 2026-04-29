@@ -88,6 +88,7 @@ export async function sendMessage(
     chunk: (convId: string, msgId: string, chunk: string) => void
     done: (convId: string, message: ChatMessage) => void
     error: (convId: string, msgId: string, error: string) => void
+    cancel: (convId: string, msgId: string) => void
   }
 ): Promise<void> {
   // Add user message
@@ -129,7 +130,31 @@ export async function sendMessage(
   // Build message history excluding the empty placeholder
   const historyMessages = conv.messages.filter(m => m.id !== assistantId)
 
+  function finalizePartial(content: string): void {
+    const finalMsg: ChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content,
+      routing,
+      streaming: false,
+    }
+    updateConversation(conversationId, c => ({
+      ...c,
+      messages: c.messages.map(m => m.id === assistantId ? finalMsg : m),
+    }))
+    emit.done(conversationId, finalMsg)
+  }
+
+  function cancelPlaceholder(): void {
+    updateConversation(conversationId, c => ({
+      ...c,
+      messages: c.messages.filter(m => m.id !== assistantId),
+    }))
+    emit.cancel(conversationId, assistantId)
+  }
+
   if (routing.provider === 'openai' || routing.provider === 'google') {
+    let accumulated = ''
     const streamFn = routing.provider === 'google'
       ? (msgs: typeof historyMessages, e: Parameters<typeof streamGeminiMessage>[1], sig?: AbortSignal) =>
           streamGeminiMessage(msgs, e, sig, routing.model as import('../shared/types').GeminiModel)
@@ -137,21 +162,11 @@ export async function sendMessage(
     await streamFn(historyMessages, {
       chunk: (text) => {
         if (signal.aborted) return
+        accumulated += text
         emit.chunk(conversationId, assistantId, text)
       },
       done: (fullText) => {
-        const finalMsg: ChatMessage = {
-          id: assistantId,
-          role: 'assistant',
-          content: fullText,
-          routing,
-          streaming: false,
-        }
-        updateConversation(conversationId, c => ({
-          ...c,
-          messages: c.messages.map(m => m.id === assistantId ? finalMsg : m),
-        }))
-        emit.done(conversationId, finalMsg)
+        finalizePartial(fullText)
       },
       error: (msg) => {
         if (signal.aborted) return
@@ -162,6 +177,10 @@ export async function sendMessage(
         emit.error(conversationId, assistantId, msg)
       },
     }, signal)
+    if (signal.aborted) {
+      if (accumulated) finalizePartial(accumulated)
+      else cancelPlaceholder()
+    }
     return
   }
 
@@ -171,6 +190,7 @@ export async function sendMessage(
     role: m.role as 'user' | 'assistant',
     content: m.content,
   }))
+  let accumulated = ''
 
   try {
     const stream = client.messages.stream({
@@ -178,8 +198,6 @@ export async function sendMessage(
       max_tokens: 4096,
       messages: apiMessages,
     }, { signal })
-
-    let accumulated = ''
 
     stream.on('text', (text) => {
       if (signal.aborted) return
@@ -189,22 +207,13 @@ export async function sendMessage(
 
     await stream.finalMessage()
 
-    const finalMsg: ChatMessage = {
-      id: assistantId,
-      role: 'assistant',
-      content: accumulated,
-      routing,
-      streaming: false,
-    }
-
-    updateConversation(conversationId, c => ({
-      ...c,
-      messages: c.messages.map(m => m.id === assistantId ? finalMsg : m),
-    }))
-
-    emit.done(conversationId, finalMsg)
+    finalizePartial(accumulated)
   } catch (err: unknown) {
-    if ((err as { name?: string })?.name === 'AbortError') return
+    if ((err as { name?: string })?.name === 'AbortError') {
+      if (accumulated) finalizePartial(accumulated)
+      else cancelPlaceholder()
+      return
+    }
     const msg = err instanceof Error ? err.message : String(err)
     updateConversation(conversationId, c => ({
       ...c,

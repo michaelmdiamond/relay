@@ -38,7 +38,11 @@ export function ChatPane() {
       useChatStore.getState().appendError(convId, msgId, error)
       useChatStore.getState().setSending(false)
     })
-    return () => { unsub0(); unsub1(); unsub2(); unsub3() }
+    const unsub4 = window.api.onCanceled((convId, msgId) => {
+      useChatStore.getState().removeMessage(convId, msgId)
+      useChatStore.getState().setSending(false)
+    })
+    return () => { unsub0(); unsub1(); unsub2(); unsub3(); unsub4() }
   }, [])
 
   async function handleSend(content: string) {

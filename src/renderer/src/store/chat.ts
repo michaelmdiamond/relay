@@ -17,6 +17,7 @@ interface ChatStore {
   appendChunk: (convId: string, msgId: string, chunk: string) => void
   finalizeMessage: (convId: string, message: ChatMessage) => void
   appendError: (convId: string, msgId: string, error: string) => void
+  removeMessage: (convId: string, msgId: string) => void
   prependConversation: (conv: Conversation) => void
   removeConversation: (id: string) => void
 }
@@ -95,6 +96,14 @@ export const useChatStore = create<ChatStore>((set) => ({
         messages: exists ? c.messages.map(m => m.id === _msgId ? errMsg : m) : [...c.messages, errMsg],
       }
     }),
+  })),
+
+  removeMessage: (convId, msgId) => set(state => ({
+    conversations: state.conversations.map(c =>
+      c.id === convId
+        ? { ...c, messages: c.messages.filter(m => m.id !== msgId) }
+        : c
+    ),
   })),
 
   prependConversation: (conv) => set(state => ({
