@@ -24,9 +24,9 @@ function clearConfig(): void {
   try { fs.unlinkSync(CONFIG_PATH) } catch { /* ignore */ }
 }
 
-export function isGeminiConnected(): { connected: boolean } {
+export function isGeminiConnected(): { configured: boolean } {
   const cfg = readConfig()
-  return { connected: !!(cfg?.apiKey) }
+  return { configured: !!(cfg?.apiKey) }
 }
 
 export function saveGeminiKey(apiKey: string): void {

@@ -101,7 +101,7 @@ export async function sendMessage(
 
   // Route — pass connection state for all free providers
   const { connected: openAIConnected } = isOpenAIConnected()
-  const { connected: geminiConnected } = isGeminiConnected()
+  const { configured: geminiConnected } = isGeminiConnected()
   const geminiModel = getGeminiModel()
   const routing = route(conv.messages, modelChoice, openAIConnected, geminiConnected, geminiModel)
 
