@@ -13,6 +13,7 @@ interface ChatStore {
   setSending: (v: boolean) => void
 
   addMessage: (convId: string, message: ChatMessage) => void
+  addStreamingPlaceholder: (convId: string, msgId: string, routing: ChatMessage['routing']) => void
   appendChunk: (convId: string, msgId: string, chunk: string) => void
   finalizeMessage: (convId: string, message: ChatMessage) => void
   appendError: (convId: string, msgId: string, error: string) => void
@@ -34,6 +35,23 @@ export const useChatStore = create<ChatStore>((set) => ({
   addMessage: (convId, message) => set(state => ({
     conversations: state.conversations.map(c =>
       c.id === convId ? { ...c, messages: [...c.messages, message] } : c
+    ),
+  })),
+
+  addStreamingPlaceholder: (convId, msgId, routing) => set(state => ({
+    conversations: state.conversations.map(c =>
+      c.id === convId
+        ? {
+            ...c,
+            messages: [...c.messages, {
+              id: msgId,
+              role: 'assistant' as const,
+              content: '',
+              routing,
+              streaming: true,
+            }],
+          }
+        : c
     ),
   })),
 

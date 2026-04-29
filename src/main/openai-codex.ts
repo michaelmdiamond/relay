@@ -75,7 +75,8 @@ export async function streamCodexMessage(
     chunk: (text: string) => void
     done: (fullText: string) => void
     error: (msg: string) => void
-  }
+  },
+  signal?: AbortSignal
 ): Promise<void> {
   let auth: { accessToken: string; accountId?: string }
 
@@ -115,7 +116,7 @@ export async function streamCodexMessage(
       method: 'POST',
       headers,
       body,
-      signal: AbortSignal.timeout(120_000),
+      signal: signal ?? AbortSignal.timeout(120_000),
     })
   } catch (err) {
     emit.error(`Network error: ${err instanceof Error ? err.message : String(err)}`)
