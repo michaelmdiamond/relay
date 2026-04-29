@@ -6,8 +6,8 @@ const MODEL_LABELS: Record<AnyModel, string> = {
   'claude-opus-4-7': 'Opus',
   'gpt-5.3-codex': 'Codex',
   'gemini-2.5-pro': 'Gemini Pro',
-  'gemini-2.0-flash': 'Gemini Flash',
-  'gemini-2.0-flash-lite': 'Gemini Flash-Lite',
+  'gemini-2.5-flash': 'Gemini Flash',
+  'gemini-2.5-flash-lite': 'Gemini Flash-Lite',
 }
 
 const MODEL_PROVIDER: Record<AnyModel, Provider> = {
@@ -16,8 +16,8 @@ const MODEL_PROVIDER: Record<AnyModel, Provider> = {
   'claude-opus-4-7': 'anthropic',
   'gpt-5.3-codex': 'openai',
   'gemini-2.5-pro': 'google',
-  'gemini-2.0-flash': 'google',
-  'gemini-2.0-flash-lite': 'google',
+  'gemini-2.5-flash': 'google',
+  'gemini-2.5-flash-lite': 'google',
 }
 
 const ANTHROPIC_FOR_CHOICE: Record<Exclude<ModelChoice, 'auto' | 'codex' | 'gemini'>, AnyModel> = {
@@ -48,7 +48,7 @@ export function route(
   choice: ModelChoice,
   openAIConnected: boolean,
   geminiConnected: boolean,
-  geminiModel: GeminiModel = 'gemini-2.0-flash'
+  geminiModel: GeminiModel = 'gemini-2.5-flash'
 ): RoutingDecision {
   // Manual Codex selection
   if (choice === 'codex') {

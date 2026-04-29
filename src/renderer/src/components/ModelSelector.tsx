@@ -10,8 +10,8 @@ const OPTIONS: { value: ModelChoice; label: string; sub: string }[] = [
 ]
 
 const GEMINI_MODELS: { value: GeminiModel; label: string; sub: string }[] = [
-  { value: 'gemini-2.0-flash',      label: 'Flash',      sub: 'fast · free' },
-  { value: 'gemini-2.0-flash-lite', label: 'Flash-Lite', sub: 'fastest · free' },
+  { value: 'gemini-2.5-flash',      label: 'Flash',      sub: 'fast · free' },
+  { value: 'gemini-2.5-flash-lite', label: 'Flash-Lite', sub: 'fastest · free' },
   { value: 'gemini-2.5-pro',        label: 'Pro',        sub: 'most capable' },
 ]
 

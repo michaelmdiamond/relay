@@ -6,7 +6,7 @@ import type { GeminiModel } from '../../../shared/types'
 
 export function ChatPane() {
   const { conversations, activeId, modelChoice, sending, setModelChoice, setSending, appendChunk, finalizeMessage, appendError, addStreamingPlaceholder } = useChatStore()
-  const [geminiModel, setGeminiModelState] = useState<GeminiModel>('gemini-2.0-flash')
+  const [geminiModel, setGeminiModelState] = useState<GeminiModel>('gemini-2.5-flash')
   const conversation = conversations.find(c => c.id === activeId)
   const bottomRef = useRef<HTMLDivElement>(null)
 

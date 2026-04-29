@@ -5,7 +5,7 @@ import type { GeminiModel } from '../shared/types'
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'gemini-config.json')
 
-const DEFAULT_MODEL: GeminiModel = 'gemini-2.0-flash'
+const DEFAULT_MODEL: GeminiModel = 'gemini-2.5-flash'
 
 interface GeminiConfig {
   apiKey: string
