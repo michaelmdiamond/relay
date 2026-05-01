@@ -9,8 +9,11 @@ interface UsageRow {
   key: string
   label: string
   inputTokens: number
+  cachedInputTokens: number
+  effectiveInputTokens: number
   outputTokens: number
   totalTokens: number
+  effectiveTotalTokens: number
 }
 
 interface UsageSnapshot {
@@ -30,8 +33,11 @@ interface UsageEvent {
   project: string
   timestamp: number
   inputTokens: number
+  cachedInputTokens: number
+  effectiveInputTokens: number
   outputTokens: number
   totalTokens: number
+  effectiveTotalTokens: number
 }
 
 function formatCount(value: number): string {
@@ -56,12 +62,18 @@ function aggregateRows(events: UsageEvent[], keyFor: (event: UsageEvent) => stri
       key,
       label: labelFor(event),
       inputTokens: 0,
+      cachedInputTokens: 0,
+      effectiveInputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
+      effectiveTotalTokens: 0,
     }
     existing.inputTokens += event.inputTokens
+    existing.cachedInputTokens += event.cachedInputTokens
+    existing.effectiveInputTokens += event.effectiveInputTokens
     existing.outputTokens += event.outputTokens
     existing.totalTokens += event.totalTokens
+    existing.effectiveTotalTokens += event.effectiveTotalTokens
     buckets.set(key, existing)
   }
 
@@ -81,6 +93,8 @@ function summarizeUsage(conversations: Conversation[]): UsageSnapshot {
       if (Number.isNaN(stamp)) continue
 
       conversationIds.add(conversation.id)
+      const cached = message.usage.cachedInputTokens ?? 0
+      const effective = message.usage.effectiveInputTokens ?? (message.usage.inputTokens - cached)
       events.push({
         provider: message.routing.provider,
         model: message.routing.model,
@@ -88,8 +102,11 @@ function summarizeUsage(conversations: Conversation[]): UsageSnapshot {
         project: conversation.projectName ?? 'Unassigned',
         timestamp: stamp,
         inputTokens: message.usage.inputTokens,
+        cachedInputTokens: cached,
+        effectiveInputTokens: effective,
         outputTokens: message.usage.outputTokens,
         totalTokens: message.usage.totalTokens,
+        effectiveTotalTokens: effective + message.usage.outputTokens,
       })
     }
   }
@@ -99,8 +116,11 @@ function summarizeUsage(conversations: Conversation[]): UsageSnapshot {
     key: label.toLowerCase().replace(/\s+/g, '-'),
     label,
     inputTokens: rows.reduce((sum, row) => sum + row.inputTokens, 0),
+    cachedInputTokens: rows.reduce((sum, row) => sum + row.cachedInputTokens, 0),
+    effectiveInputTokens: rows.reduce((sum, row) => sum + row.effectiveInputTokens, 0),
     outputTokens: rows.reduce((sum, row) => sum + row.outputTokens, 0),
     totalTokens: rows.reduce((sum, row) => sum + row.totalTokens, 0),
+    effectiveTotalTokens: rows.reduce((sum, row) => sum + row.effectiveTotalTokens, 0),
   })
 
   return {
@@ -173,13 +193,24 @@ function BreakdownTable({ title, rows }: { title: string; rows: UsageRow[] }) {
       {rows.length === 0 ? (
         <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)' }}>No tracked usage yet for this period.</div>
       ) : (
-        <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'grid', gap: 12 }}>
           {rows.slice(0, 8).map((row) => (
-            <div key={row.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', fontSize: 13 }}>
-              <span style={{ color: '#e2e8f0' }}>{row.label}</span>
-              <span style={{ color: 'rgba(255,255,255,0.55)' }}>
-                {formatCount(row.totalTokens)} total ({formatCount(row.inputTokens)} in / {formatCount(row.outputTokens)} out)
-              </span>
+            <div key={row.key} style={{ display: 'grid', gap: 3 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+                <span style={{ color: '#e2e8f0' }}>{row.label}</span>
+                <span style={{ color: '#f8fafc', fontWeight: 500 }}>
+                  {formatCount(row.effectiveTotalTokens)} effective
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <span>{formatCount(row.effectiveInputTokens)} new in</span>
+                <span>·</span>
+                <span>{formatCount(row.cachedInputTokens)} cached</span>
+                <span>·</span>
+                <span>{formatCount(row.outputTokens)} out</span>
+                <span>·</span>
+                <span>{formatCount(row.totalTokens)} raw total</span>
+              </div>
             </div>
           ))}
         </div>
@@ -250,18 +281,35 @@ export function UsageDashboard({ conversations }: Props) {
           <p style={{ margin: 0, color: 'rgba(255,255,255,0.56)', fontSize: 14, maxWidth: 760 }}>
             Relay is aggregating token usage from every tracked assistant response it has seen. Current-month views use message timestamps when available and fall back to conversation timestamps for older history.
           </p>
+          <div style={{
+            display: 'flex',
+            gap: 10,
+            padding: '10px 14px',
+            borderRadius: 12,
+            background: 'rgba(56,189,248,0.08)',
+            border: '1px solid rgba(56,189,248,0.18)',
+            fontSize: 13,
+            color: 'rgba(186,230,253,0.85)',
+            maxWidth: 760,
+            alignItems: 'flex-start',
+          }}>
+            <span style={{ flexShrink: 0, marginTop: 1 }}>ℹ</span>
+            <span>
+              <strong style={{ color: '#bae6fd' }}>Effective vs raw tokens:</strong> Raw input includes the full conversation context sent each turn. Cached input is the portion the model served from its cache — already-seen context that costs less or nothing. <strong>Effective tokens</strong> (new input + output) are what actually matters for cost and throughput.
+            </span>
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
           <MetricCard
-            label="All-time tokens"
-            value={formatCount(snapshot.allTime.totalTokens)}
-            detail={`${formatCount(snapshot.allTime.inputTokens)} in / ${formatCount(snapshot.allTime.outputTokens)} out`}
+            label="All-time effective tokens"
+            value={formatCount(snapshot.allTime.effectiveTotalTokens)}
+            detail={`${formatCount(snapshot.allTime.cachedInputTokens)} cached / ${formatCount(snapshot.allTime.totalTokens)} raw total`}
           />
           <MetricCard
-            label={snapshot.currentMonth.label}
-            value={formatCount(snapshot.currentMonth.totalTokens)}
-            detail={`${formatCount(snapshot.currentMonth.inputTokens)} in / ${formatCount(snapshot.currentMonth.outputTokens)} out`}
+            label={`${snapshot.currentMonth.label} effective`}
+            value={formatCount(snapshot.currentMonth.effectiveTotalTokens)}
+            detail={`${formatCount(snapshot.currentMonth.cachedInputTokens)} cached / ${formatCount(snapshot.currentMonth.totalTokens)} raw total`}
           />
           <MetricCard
             label="Tracked chats"
