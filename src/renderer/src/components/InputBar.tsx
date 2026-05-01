@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { ModelSelector } from './ModelSelector'
-import type { ChatMode, ContextAttachment, CursorModelOption, GeminiModel, ModelChoice, SendMessageOptions } from '../../../shared/types'
+import type { CursorModelOption, GeminiModel, ModelChoice, SendMessageOptions, SkillEntry } from '../../../shared/types'
+
+const PROVIDER_COLOR: Record<'claude' | 'codex', string> = {
+  claude: 'rgba(168,85,247,0.75)',
+  codex: 'rgba(56,189,248,0.75)',
+}
 
 interface Props {
   modelChoice: ModelChoice
@@ -22,15 +27,6 @@ interface Props {
   streaming?: boolean
 }
 
-const MODES: Array<{ id: ChatMode; label: string }> = [
-  { id: 'quick', label: 'Quick' },
-  { id: 'deep', label: 'Deep' },
-  { id: 'code', label: 'Code' },
-  { id: 'review', label: 'Review' },
-  { id: 'brainstorm', label: 'Ideas' },
-  { id: 'compare', label: 'Compare' },
-]
-
 export function InputBar({
   modelChoice,
   onModelChange,
@@ -51,39 +47,70 @@ export function InputBar({
   streaming,
 }: Props) {
   const [text, setText] = useState('')
-  const [mode, setMode] = useState<ChatMode>('quick')
-  const [contextText, setContextText] = useState('')
-  const [contextOpen, setContextOpen] = useState(false)
   const [tokenEstimate, setTokenEstimate] = useState(0)
+  const [skills, setSkills] = useState<SkillEntry[]>([])
+  const [activeSkill, setActiveSkill] = useState<SkillEntry | null>(null)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [paletteQuery, setPaletteQuery] = useState('')
+  const [paletteIndex, setPaletteIndex] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const paletteRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    window.api.getSkills().then(setSkills).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const handle = window.setTimeout(async () => {
-      const estimate = await window.api.estimateTokens([text, contextText].filter(Boolean).join('\n\n'))
+      const estimate = await window.api.estimateTokens(text)
       setTokenEstimate(estimate)
     }, 150)
     return () => window.clearTimeout(handle)
-  }, [text, contextText])
+  }, [text])
+
+  const filteredSkills = paletteQuery
+    ? skills.filter(s =>
+        s.name.toLowerCase().includes(paletteQuery.toLowerCase()) ||
+        s.provider.toLowerCase().includes(paletteQuery.toLowerCase())
+      )
+    : skills
 
   function submit() {
     const trimmed = text.trim()
     if (!trimmed || disabled) return
-    const attachments: ContextAttachment[] = contextText.trim()
-      ? [{
-          id: crypto.randomUUID(),
-          title: 'Context shelf',
-          content: contextText.trim(),
-          tokenEstimate: Math.ceil(contextText.trim().length / 4),
-        }]
-      : []
-    onSend(trimmed, { mode, attachments })
+    onSend(trimmed, { mode: 'quick', attachments: [], skill: activeSkill ?? undefined })
     setText('')
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-    }
+    setActiveSkill(null)
+    setPaletteOpen(false)
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  function selectSkill(skill: SkillEntry) {
+    setActiveSkill(skill)
+    setText('')
+    setPaletteOpen(false)
+    setPaletteQuery('')
+    textareaRef.current?.focus()
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
+    if (paletteOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setPaletteIndex(i => Math.min(i + 1, filteredSkills.length - 1))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setPaletteIndex(i => Math.max(i - 1, 0))
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        if (filteredSkills[paletteIndex]) selectSkill(filteredSkills[paletteIndex])
+      } else if (e.key === 'Escape') {
+        setPaletteOpen(false)
+        setText('')
+      }
+      return
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       submit()
@@ -91,7 +118,18 @@ export function InputBar({
   }
 
   function onInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setText(e.target.value)
+    const val = e.target.value
+    setText(val)
+
+    if (val.startsWith('/')) {
+      const query = val.slice(1)
+      setPaletteQuery(query)
+      setPaletteOpen(true)
+      setPaletteIndex(0)
+    } else {
+      setPaletteOpen(false)
+    }
+
     const el = e.target
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
@@ -102,69 +140,129 @@ export function InputBar({
       padding: '12px 16px 16px',
       borderTop: '1px solid rgba(255,255,255,0.06)',
       background: 'rgba(0,0,0,0.2)',
-      }}>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-        {MODES.map(item => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setMode(item.id)}
-            disabled={disabled}
-            style={{
-              border: '1px solid rgba(255,255,255,0.1)',
-              background: mode === item.id ? 'rgba(96,165,250,0.22)' : 'rgba(255,255,255,0.04)',
-              color: mode === item.id ? '#bfdbfe' : 'rgba(255,255,255,0.62)',
-              borderRadius: 8,
-              padding: '5px 8px',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: disabled ? 'default' : 'pointer',
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => setContextOpen(v => !v)}
-          disabled={disabled}
+      position: 'relative',
+    }}>
+      {/* Skill palette */}
+      {paletteOpen && filteredSkills.length > 0 && (
+        <div
+          ref={paletteRef}
           style={{
-            marginLeft: 'auto',
-            border: '1px solid rgba(255,255,255,0.1)',
-            background: contextText.trim() ? 'rgba(74,222,128,0.14)' : 'rgba(255,255,255,0.04)',
-            color: contextText.trim() ? '#bbf7d0' : 'rgba(255,255,255,0.62)',
-            borderRadius: 8,
-            padding: '5px 8px',
-            fontSize: 11,
-            fontWeight: 700,
-            cursor: disabled ? 'default' : 'pointer',
+            position: 'absolute',
+            bottom: 'calc(100% + 4px)',
+            left: 16,
+            right: 16,
+            maxHeight: 280,
+            overflowY: 'auto',
+            background: 'rgba(15,23,42,0.97)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 12,
+            zIndex: 50,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
           }}
         >
-          Context
-        </button>
-      </div>
-      {contextOpen && (
-        <textarea
-          value={contextText}
-          onChange={(event) => setContextText(event.target.value)}
-          placeholder="Add temporary files, notes, constraints, or snippets for the next message."
-          rows={4}
-          disabled={disabled}
-          style={{
-            width: '100%',
-            marginBottom: 8,
-            resize: 'vertical',
-            borderRadius: 10,
-            padding: 10,
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.09)',
-            color: '#e2e8f0',
-            font: 'inherit',
-            fontSize: 12,
-            lineHeight: 1.45,
-          }}
-        />
+          <div style={{ padding: '6px 10px 4px', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.35)' }}>
+            Skills — type to filter, ↑↓ to navigate, Enter to select
+          </div>
+          {filteredSkills.map((skill, i) => (
+            <div
+              key={skill.id}
+              onMouseDown={(e) => { e.preventDefault(); selectSkill(skill) }}
+              onMouseEnter={() => setPaletteIndex(i)}
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 10,
+                padding: '8px 12px',
+                cursor: 'pointer',
+                background: i === paletteIndex ? 'rgba(255,255,255,0.07)' : 'transparent',
+                borderRadius: 8,
+                margin: '2px 4px',
+              }}
+            >
+              <span style={{
+                fontSize: 11,
+                fontWeight: 600,
+                padding: '1px 6px',
+                borderRadius: 4,
+                background: PROVIDER_COLOR[skill.provider],
+                color: '#fff',
+                flexShrink: 0,
+              }}>
+                {skill.provider}
+              </span>
+              <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 500 }}>{skill.name}</span>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {skill.description.slice(0, 100)}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
+
+      {paletteOpen && filteredSkills.length === 0 && paletteQuery && (
+        <div style={{
+          position: 'absolute',
+          bottom: 'calc(100% + 4px)',
+          left: 16,
+          right: 16,
+          padding: '10px 14px',
+          background: 'rgba(15,23,42,0.97)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: 12,
+          fontSize: 13,
+          color: 'rgba(255,255,255,0.4)',
+          zIndex: 50,
+        }}>
+          No skills match "{paletteQuery}"
+        </div>
+      )}
+
+      {/* Active skill chip */}
+      {activeSkill && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          marginBottom: 8,
+          padding: '4px 10px 4px 8px',
+          borderRadius: 8,
+          background: 'rgba(255,255,255,0.06)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          width: 'fit-content',
+        }}>
+          <span style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: '1px 5px',
+            borderRadius: 3,
+            background: PROVIDER_COLOR[activeSkill.provider],
+            color: '#fff',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          }}>
+            {activeSkill.provider}
+          </span>
+          <span style={{ fontSize: 12, color: '#e2e8f0' }}>{activeSkill.name}</span>
+          <button
+            type="button"
+            onClick={() => setActiveSkill(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'rgba(255,255,255,0.4)',
+              cursor: 'pointer',
+              fontSize: 14,
+              lineHeight: 1,
+              padding: 0,
+              marginLeft: 2,
+            }}
+            title="Remove skill"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div style={{
         display: 'flex',
         alignItems: 'flex-end',
@@ -179,7 +277,7 @@ export function InputBar({
           value={text}
           onChange={onInput}
           onKeyDown={onKeyDown}
-          placeholder="Message…"
+          placeholder={activeSkill ? `Message with /${activeSkill.name}…` : 'Message… (type / for skills)'}
           disabled={disabled}
           rows={1}
           style={{

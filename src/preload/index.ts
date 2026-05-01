@@ -6,6 +6,7 @@ const api: ChatApi = {
   setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),
   getConversations: () => ipcRenderer.invoke('get-conversations'),
   getConnectorInventory: () => ipcRenderer.invoke('get-connector-inventory'),
+  getSkills: () => ipcRenderer.invoke('get-skills'),
   getUsageLimits: () => ipcRenderer.invoke('get-usage-limits'),
   saveUsageLimits: (limits) => ipcRenderer.invoke('save-usage-limits', limits),
   getAgentProfiles: () => ipcRenderer.invoke('get-agent-profiles'),

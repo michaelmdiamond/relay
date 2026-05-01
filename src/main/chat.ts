@@ -253,8 +253,12 @@ function formatContextPacket(packet: ContextPacket): string {
 
 function buildSystemContext(conv: Conversation, options?: SendMessageOptions, contextPacket?: ContextPacket): string {
   if (contextPacket) return formatContextPacket(contextPacket)
+  const skillBlock = options?.skill
+    ? `Active skill — ${options.skill.name} (${options.skill.provider}):\n\n${options.skill.body}`
+    : ''
   const blocks = [
     modeInstruction(options?.mode ?? conv.mode ?? 'quick'),
+    skillBlock,
     formatMemory(conv.memory),
     formatAttachments(options?.attachments),
   ].filter(Boolean)

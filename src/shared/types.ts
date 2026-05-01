@@ -90,9 +90,18 @@ export interface WorkerResult {
   suggestedNextSteps: string[]
 }
 
+export interface SkillEntry {
+  id: string
+  provider: 'claude' | 'codex'
+  name: string
+  description: string
+  body: string
+}
+
 export interface SendMessageOptions {
   mode?: ChatMode
   attachments?: ContextAttachment[]
+  skill?: SkillEntry
 }
 
 export interface RequestDiagnostics {
@@ -265,6 +274,7 @@ export interface ChatApi {
   setApiKey: (key: string) => Promise<void>
   getConversations: () => Promise<Conversation[]>
   getConnectorInventory: () => Promise<ConnectorInventory>
+  getSkills: () => Promise<SkillEntry[]>
   getUsageLimits: () => Promise<UsageLimitSettings>
   saveUsageLimits: (limits: UsageLimitSettings) => Promise<UsageLimitSettings>
   sendMessage: (conversationId: string, content: string, modelChoice: ModelChoice, options?: SendMessageOptions) => Promise<void>

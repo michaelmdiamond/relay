@@ -24,6 +24,7 @@ import { listCursorModels, validateCursorKey } from './cursor-agent'
 import type { GeminiModel, TerminalLauncherId } from '../shared/types'
 import { getUsageLimits, saveUsageLimits } from './usage-limits'
 import { getConnectorInventory } from './connectors'
+import { getSkills } from './skills'
 import {
   getAgentProfiles,
   getWorkflowDefinitions,
@@ -75,6 +76,7 @@ ipcMain.handle('get-api-key-status', () => ({ configured: isApiKeyConfigured() }
 ipcMain.handle('set-api-key', (_e, key: string) => saveApiKey(key))
 ipcMain.handle('get-conversations', () => getConversations())
 ipcMain.handle('get-connector-inventory', () => getConnectorInventory())
+ipcMain.handle('get-skills', () => getSkills())
 ipcMain.handle('get-usage-limits', () => getUsageLimits())
 ipcMain.handle('save-usage-limits', (_e, limits) => saveUsageLimits(limits))
 ipcMain.handle('update-conversation-memory', (_e, conversationId: string, memory) => updateConversationMemory(conversationId, memory))
