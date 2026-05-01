@@ -1,5 +1,73 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ConnectorInventory, ConnectorProviderSnapshot } from '../../../shared/types'
+import type { ConnectorInventory, ConnectorProviderSnapshot, SkillEntry } from '../../../shared/types'
+
+const PROVIDER_COLOR: Record<'claude' | 'codex', string> = {
+  claude: 'rgba(168,85,247,0.8)',
+  codex: 'rgba(56,189,248,0.8)',
+}
+
+function SkillsSection({ skills }: { skills: SkillEntry[] }) {
+  const byProvider = skills.reduce<Record<string, SkillEntry[]>>((acc, s) => {
+    ;(acc[s.provider] ??= []).push(s)
+    return acc
+  }, {})
+
+  if (skills.length === 0) {
+    return (
+      <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.38)', padding: '4px 0' }}>
+        No skills found in ~/.claude/plugins or ~/.codex/skills.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      {(Object.entries(byProvider) as [('claude' | 'codex'), SkillEntry[]][]).map(([provider, providerSkills]) => (
+        <div key={provider}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 700,
+              padding: '2px 7px',
+              borderRadius: 4,
+              background: PROVIDER_COLOR[provider],
+              color: '#fff',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+            }}>
+              {provider}
+            </span>
+            <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.38)' }}>{providerSkills.length} skills</span>
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {providerSkills.map((skill) => (
+              <div key={skill.id} style={{
+                display: 'grid',
+                gap: 2,
+                padding: '8px 12px',
+                borderRadius: 10,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.07)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 500 }}>{skill.name}</span>
+                  <code style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.07)', padding: '1px 5px', borderRadius: 4 }}>
+                    /{skill.name}
+                  </code>
+                </div>
+                {skill.description && (
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 1.4 }}>
+                    {skill.description.length > 160 ? `${skill.description.slice(0, 160)}…` : skill.description}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function countConnectorItems(inventory: ConnectorInventory | null): number {
   if (!inventory) return 0
@@ -41,6 +109,7 @@ function ConnectorCard({ provider }: { provider: ConnectorProviderSnapshot }) {
 
 export function ConnectionsDashboard() {
   const [connectorInventory, setConnectorInventory] = useState<ConnectorInventory | null>(null)
+  const [skills, setSkills] = useState<SkillEntry[]>([])
   const [openAIEmail, setOpenAIEmail] = useState<string | null>(null)
   const [connectingOpenAI, setConnectingOpenAI] = useState(false)
   const [geminiConfigured, setGeminiConfigured] = useState(false)
@@ -89,12 +158,13 @@ export function ConnectionsDashboard() {
   }, [ollamaModel])
 
   async function refreshConnections() {
-    const [openAI, gemini, ollama, cursor, inventory] = await Promise.all([
+    const [openAI, gemini, ollama, cursor, inventory, skillList] = await Promise.all([
       window.api.getOpenAIAuthStatus(),
       window.api.getGeminiKeyStatus(),
       window.api.getOllamaStatus(),
       window.api.getCursorKeyStatus(),
       window.api.getConnectorInventory(),
+      window.api.getSkills(),
     ])
 
     setOpenAIEmail(openAI.connected ? (openAI.email ?? 'Connected') : null)
@@ -103,6 +173,7 @@ export function ConnectionsDashboard() {
     setCursorLabel(cursor.userEmail ?? cursor.apiKeyName ?? (cursor.configured ? 'Cursor connected' : null))
     setOllamaModel(ollama.configured && ollama.model ? ollama.model : null)
     setConnectorInventory(inventory)
+    setSkills(skillList)
   }
 
   async function handleConnectOpenAI() {
@@ -406,6 +477,31 @@ export function ConnectionsDashboard() {
               })}.
             </div>
           )}
+        </section>
+
+        <section style={{
+          padding: '18px 20px',
+          borderRadius: 18,
+          background: 'rgba(255,255,255,0.05)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          display: 'grid',
+          gap: 14,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'end' }}>
+            <div style={{ display: 'grid', gap: 4 }}>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.46)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                Skills
+              </div>
+              <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.62)' }}>
+                Installed skills from Claude and Codex. Type <code style={{ fontSize: 12, background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4 }}>/</code> in any chat to invoke one.
+              </div>
+            </div>
+            <span style={{ color: 'rgba(255,255,255,0.42)', fontSize: 12, flexShrink: 0 }}>
+              {skills.length} found
+            </span>
+          </div>
+
+          <SkillsSection skills={skills} />
         </section>
       </div>
     </div>
