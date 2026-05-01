@@ -1,12 +1,21 @@
-import type { GeminiModel, ModelChoice } from '../../../shared/types'
+import { useState } from 'react'
+import type { CursorModelOption, GeminiModel, ModelChoice } from '../../../shared/types'
 
-const OPTIONS: { value: ModelChoice; label: string; sub: string }[] = [
+type TopLevelChoice = 'auto' | 'claude' | 'codex' | 'gemini' | 'ollama' | 'cursor'
+
+const OPTIONS: { value: TopLevelChoice; label: string; sub: string }[] = [
   { value: 'auto',   label: 'Auto',   sub: 'router picks' },
+  { value: 'claude', label: 'Claude', sub: 'Anthropic' },
+  { value: 'codex',  label: 'Codex',  sub: 'GPT subscription' },
+  { value: 'gemini', label: 'Gemini', sub: 'Google key' },
+  { value: 'ollama', label: 'Local',  sub: 'Ollama' },
+  { value: 'cursor', label: 'Cursor', sub: 'SDK agent' },
+]
+
+const CLAUDE_MODELS: { value: Extract<ModelChoice, 'haiku' | 'sonnet' | 'opus'>; label: string; sub: string }[] = [
   { value: 'haiku',  label: 'Haiku',  sub: 'fast & cheap' },
   { value: 'sonnet', label: 'Sonnet', sub: 'balanced' },
   { value: 'opus',   label: 'Opus',   sub: 'most capable' },
-  { value: 'codex',  label: 'Codex',  sub: 'GPT subscription' },
-  { value: 'gemini', label: 'Gemini', sub: 'Google key' },
 ]
 
 const GEMINI_MODELS: { value: GeminiModel; label: string; sub: string }[] = [
@@ -20,10 +29,62 @@ interface Props {
   onChange: (v: ModelChoice) => void
   geminiModel?: GeminiModel
   onGeminiModelChange?: (v: GeminiModel) => void
+  ollamaModel?: string | null
+  ollamaModels?: string[]
+  onOllamaModelChange?: (v: string) => void
+  cursorModel?: string
+  cursorModels?: CursorModelOption[]
+  cursorModelsLoading?: boolean
+  cursorModelsError?: string
+  onCursorModelChange?: (v: string) => void
+  onCursorModelsRefresh?: () => void
   disabled?: boolean
 }
 
-export function ModelSelector({ value, onChange, geminiModel, onGeminiModelChange, disabled }: Props) {
+export function ModelSelector({
+  value,
+  onChange,
+  geminiModel,
+  onGeminiModelChange,
+  ollamaModel,
+  ollamaModels,
+  onOllamaModelChange,
+  cursorModel,
+  cursorModels,
+  cursorModelsLoading,
+  cursorModelsError,
+  onCursorModelChange,
+  onCursorModelsRefresh,
+  disabled,
+}: Props) {
+  const topLevelValue: TopLevelChoice =
+    value === 'haiku' || value === 'sonnet' || value === 'opus'
+      ? 'claude'
+      : value
+  const [collapsedTopLevel, setCollapsedTopLevel] = useState<TopLevelChoice | null>(null)
+  const showSubmenu = collapsedTopLevel !== topLevelValue
+  const cursorModelOptions: CursorModelOption[] = [
+    { id: 'auto', displayName: 'Auto-select' },
+    ...(cursorModels ?? []).filter(model => model.id !== 'auto'),
+  ]
+  if (cursorModel && !cursorModelOptions.some(model => model.id === cursorModel)) {
+    cursorModelOptions.push({ id: cursorModel, displayName: cursorModel })
+  }
+
+  function handleTopLevelChange(next: TopLevelChoice) {
+    if (next === topLevelValue) {
+      setCollapsedTopLevel(current => current === next ? null : next)
+      return
+    }
+
+    setCollapsedTopLevel(null)
+    if (next === 'claude') {
+      onChange(value === 'haiku' || value === 'sonnet' || value === 'opus' ? value : 'sonnet')
+      return
+    }
+    onChange(next)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <div style={{ display: 'flex', gap: 4 }}>
@@ -31,16 +92,16 @@ export function ModelSelector({ value, onChange, geminiModel, onGeminiModelChang
           <button
             key={opt.value}
             disabled={disabled}
-            onClick={() => onChange(opt.value)}
+            onClick={() => handleTopLevelChange(opt.value)}
             style={{
               padding: '4px 10px',
               borderRadius: 6,
               border: 'none',
               cursor: disabled ? 'default' : 'pointer',
               fontSize: 12,
-              fontWeight: value === opt.value ? 600 : 400,
-              background: value === opt.value ? 'rgba(255,255,255,0.15)' : 'transparent',
-              color: value === opt.value ? '#fff' : 'rgba(255,255,255,0.45)',
+              fontWeight: topLevelValue === opt.value ? 600 : 400,
+              background: topLevelValue === opt.value ? 'rgba(255,255,255,0.15)' : 'transparent',
+              color: topLevelValue === opt.value ? '#fff' : 'rgba(255,255,255,0.45)',
               transition: 'all 0.15s',
             }}
           >
@@ -49,7 +110,33 @@ export function ModelSelector({ value, onChange, geminiModel, onGeminiModelChang
         ))}
       </div>
 
-      {value === 'gemini' && onGeminiModelChange && (
+      {topLevelValue === 'claude' && showSubmenu && (
+        <div style={{ display: 'flex', gap: 4, paddingLeft: 2 }}>
+          {CLAUDE_MODELS.map(opt => (
+            <button
+              key={opt.value}
+              disabled={disabled}
+              onClick={() => onChange(opt.value)}
+              style={{
+                padding: '3px 8px',
+                borderRadius: 5,
+                border: `1px solid ${value === opt.value ? 'rgba(145,181,255,0.4)' : 'transparent'}`,
+                cursor: disabled ? 'default' : 'pointer',
+                fontSize: 11,
+                fontWeight: value === opt.value ? 600 : 400,
+                background: value === opt.value ? 'rgba(145,181,255,0.12)' : 'transparent',
+                color: value === opt.value ? '#91b5ff' : 'rgba(255,255,255,0.35)',
+                transition: 'all 0.15s',
+              }}
+            >
+              {opt.label}
+              <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>{opt.sub}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {value === 'gemini' && showSubmenu && onGeminiModelChange && (
         <div style={{ display: 'flex', gap: 4, paddingLeft: 2 }}>
           {GEMINI_MODELS.map(opt => (
             <button
@@ -72,6 +159,81 @@ export function ModelSelector({ value, onChange, geminiModel, onGeminiModelChang
               <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>{opt.sub}</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {topLevelValue === 'ollama' && showSubmenu && !!ollamaModels?.length && onOllamaModelChange && (
+        <div style={{ display: 'flex', gap: 4, paddingLeft: 2, flexWrap: 'wrap' }}>
+          {ollamaModels.map(model => (
+            <button
+              key={model}
+              disabled={disabled}
+              onClick={() => onOllamaModelChange(model)}
+              style={{
+                padding: '3px 8px',
+                borderRadius: 5,
+                border: `1px solid ${ollamaModel === model ? 'rgba(167,139,250,0.4)' : 'transparent'}`,
+                cursor: disabled ? 'default' : 'pointer',
+                fontSize: 11,
+                fontWeight: ollamaModel === model ? 600 : 400,
+                background: ollamaModel === model ? 'rgba(167,139,250,0.12)' : 'transparent',
+                color: ollamaModel === model ? '#c4b5fd' : 'rgba(255,255,255,0.35)',
+                transition: 'all 0.15s',
+              }}
+            >
+              {model}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {topLevelValue === 'cursor' && showSubmenu && onCursorModelChange && (
+        <div style={{ display: 'flex', gap: 4, paddingLeft: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+          {cursorModelOptions.map(model => (
+            <button
+              key={model.id}
+              disabled={disabled || cursorModelsLoading}
+              onClick={() => onCursorModelChange(model.id)}
+              style={{
+                padding: '3px 8px',
+                borderRadius: 5,
+                border: `1px solid ${cursorModel === model.id ? 'rgba(244,114,182,0.4)' : 'transparent'}`,
+                cursor: disabled || cursorModelsLoading ? 'default' : 'pointer',
+                fontSize: 11,
+                fontWeight: cursorModel === model.id ? 600 : 400,
+                background: cursorModel === model.id ? 'rgba(244,114,182,0.12)' : 'transparent',
+                color: cursorModel === model.id ? '#f9a8d4' : 'rgba(255,255,255,0.35)',
+                transition: 'all 0.15s',
+              }}
+            >
+              {model.displayName || model.id}
+            </button>
+          ))}
+          {cursorModelsLoading && (
+            <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11 }}>Loading models...</span>
+          )}
+          {cursorModelsError && !cursorModelsLoading && (
+            <span style={{ color: 'rgba(248,113,113,0.8)', fontSize: 11 }}>{cursorModelsError}</span>
+          )}
+          {onCursorModelsRefresh && (
+            <button
+              type="button"
+              disabled={disabled || cursorModelsLoading}
+              onClick={onCursorModelsRefresh}
+              style={{
+                padding: '3px 8px',
+                borderRadius: 5,
+                border: '1px solid rgba(255,255,255,0.08)',
+                cursor: disabled || cursorModelsLoading ? 'default' : 'pointer',
+                fontSize: 11,
+                fontWeight: 600,
+                background: 'rgba(255,255,255,0.04)',
+                color: 'rgba(255,255,255,0.48)',
+              }}
+            >
+              Refresh
+            </button>
+          )}
         </div>
       )}
     </div>
