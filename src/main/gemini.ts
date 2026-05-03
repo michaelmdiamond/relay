@@ -1,5 +1,6 @@
 import { getGeminiApiKey, getGeminiModel } from './gemini-auth'
-import type { ChatMessage, GeminiModel } from '../shared/types'
+import type { ChatMessage, GeminiModel, TokenUsage } from '../shared/types'
+import { RELAY_SYSTEM_PROMPT } from './system-prompt'
 
 const BASE = 'https://generativelanguage.googleapis.com'
 
@@ -14,11 +15,12 @@ export async function streamGeminiMessage(
   messages: ChatMessage[],
   emit: {
     chunk: (text: string) => void
-    done: (fullText: string) => void
+    done: (fullText: string, usage?: TokenUsage) => void
     error: (msg: string) => void
   },
   signal?: AbortSignal,
-  model?: GeminiModel
+  model?: GeminiModel,
+  systemContext?: string
 ): Promise<void> {
   const apiKey = getGeminiApiKey()
   if (!apiKey) {
@@ -30,7 +32,7 @@ export async function streamGeminiMessage(
 
   const requestBody = {
     contents: toGeminiContents(messages),
-    systemInstruction: { parts: [{ text: 'You are a helpful assistant.' }] },
+    systemInstruction: { parts: [{ text: [RELAY_SYSTEM_PROMPT, systemContext].filter(Boolean).join('\n\n') }] },
     generationConfig: { maxOutputTokens: 8192 },
   }
 
@@ -62,6 +64,7 @@ export async function streamGeminiMessage(
   const decoder = new TextDecoder()
   let buffer = ''
   let accumulated = ''
+  let usage: TokenUsage | undefined
 
   try {
     while (true) {
@@ -82,12 +85,31 @@ export async function streamGeminiMessage(
             candidates?: Array<{
               content?: { parts?: Array<{ text?: string }> }
             }>
+            usageMetadata?: {
+              promptTokenCount?: number
+              candidatesTokenCount?: number
+              totalTokenCount?: number
+              cachedContentTokenCount?: number
+            }
           }
 
           const text = event.candidates?.[0]?.content?.parts?.[0]?.text
           if (text) {
             accumulated += text
             emit.chunk(text)
+          }
+
+          if (event.usageMetadata) {
+            const inputTokens = event.usageMetadata.promptTokenCount ?? 0
+            const outputTokens = event.usageMetadata.candidatesTokenCount ?? 0
+            const totalTokens = event.usageMetadata.totalTokenCount ?? (inputTokens + outputTokens)
+            const cachedInputTokens = event.usageMetadata.cachedContentTokenCount
+            usage = {
+              inputTokens,
+              outputTokens,
+              totalTokens,
+              ...(cachedInputTokens ? { cachedInputTokens } : {}),
+            }
           }
         } catch {
           // Malformed SSE line — skip
@@ -99,5 +121,5 @@ export async function streamGeminiMessage(
     return
   }
 
-  emit.done(accumulated)
+  emit.done(accumulated, usage)
 }

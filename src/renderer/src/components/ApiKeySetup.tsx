@@ -13,7 +13,16 @@ export function ApiKeySetup({ onSaved }: Props) {
   const [geminiError, setGeminiError] = useState('')
   const [geminiSaving, setGeminiSaving] = useState(false)
 
+  const [cursorKey, setCursorKey] = useState('')
+  const [cursorError, setCursorError] = useState('')
+  const [cursorSaving, setCursorSaving] = useState(false)
+
   const [openAIStatus, setOpenAIStatus] = useState<'idle' | 'pending' | 'done'>('idle')
+
+  const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434')
+  const [ollamaModel, setOllamaModel] = useState('')
+  const [ollamaError, setOllamaError] = useState('')
+  const [ollamaSaving, setOllamaSaving] = useState(false)
 
   async function handleSaveAnthropicKey() {
     const trimmed = anthropicKey.trim()
@@ -34,6 +43,33 @@ export function ApiKeySetup({ onSaved }: Props) {
     }
     setGeminiSaving(true)
     await window.api.setGeminiKey(trimmed)
+    onSaved()
+  }
+
+  async function handleSaveCursorKey() {
+    const trimmed = cursorKey.trim()
+    if (!trimmed) {
+      setCursorError('Enter a Cursor API key')
+      return
+    }
+    setCursorSaving(true)
+    try {
+      await window.api.setCursorKey(trimmed)
+      onSaved()
+    } catch (error) {
+      setCursorSaving(false)
+      setCursorError(error instanceof Error ? error.message : 'Could not save Cursor key')
+    }
+  }
+
+  async function handleSaveOllama() {
+    const model = ollamaModel.trim()
+    if (!model) {
+      setOllamaError('Enter a model name (e.g. llama3.2)')
+      return
+    }
+    setOllamaSaving(true)
+    await window.api.setOllamaConfig(ollamaUrl.trim() || 'http://localhost:11434', model)
     onSaved()
   }
 
@@ -79,6 +115,8 @@ export function ApiKeySetup({ onSaved }: Props) {
         borderRadius: 16,
         padding: 32,
         width: 420,
+        maxHeight: 'calc(100vh - 64px)',
+        overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
         gap: 24,
@@ -172,6 +210,73 @@ export function ApiKeySetup({ onSaved }: Props) {
               Continue
             </button>
           )}
+        </div>
+
+        {/* Ollama (local) */}
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>Ollama</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>local models · no API key needed</span>
+          </div>
+          <input
+            type="text"
+            value={ollamaUrl}
+            onChange={e => setOllamaUrl(e.target.value)}
+            placeholder="http://localhost:11434"
+            style={inputStyle('')}
+          />
+          <input
+            type="text"
+            value={ollamaModel}
+            onChange={e => { setOllamaModel(e.target.value); setOllamaError('') }}
+            placeholder="llama3.2"
+            onKeyDown={e => e.key === 'Enter' && handleSaveOllama()}
+            style={inputStyle(ollamaError)}
+          />
+          {ollamaError && <p style={{ margin: 0, color: '#f87171', fontSize: 12 }}>{ollamaError}</p>}
+          <button
+            onClick={handleSaveOllama}
+            disabled={!ollamaModel.trim() || ollamaSaving}
+            style={{
+              padding: '9px', borderRadius: 8, border: 'none',
+              background: !ollamaModel.trim() ? 'rgba(255,255,255,0.08)' : 'rgba(167,139,250,0.8)',
+              color: !ollamaModel.trim() ? 'rgba(255,255,255,0.3)' : '#fff',
+              fontSize: 13, fontWeight: 600,
+              cursor: !ollamaModel.trim() ? 'default' : 'pointer',
+            }}
+          >
+            {ollamaSaving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+
+        {/* Cursor SDK */}
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>Cursor</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>SDK agents · billed by Cursor</span>
+          </div>
+          <input
+            type="password"
+            value={cursorKey}
+            onChange={e => { setCursorKey(e.target.value); setCursorError('') }}
+            placeholder="Cursor API key"
+            onKeyDown={e => e.key === 'Enter' && handleSaveCursorKey()}
+            style={inputStyle(cursorError)}
+          />
+          {cursorError && <p style={{ margin: 0, color: '#f87171', fontSize: 12 }}>{cursorError}</p>}
+          <button
+            onClick={handleSaveCursorKey}
+            disabled={!cursorKey.trim() || cursorSaving}
+            style={{
+              padding: '9px', borderRadius: 8, border: 'none',
+              background: !cursorKey.trim() ? 'rgba(255,255,255,0.08)' : 'rgba(244,114,182,0.78)',
+              color: !cursorKey.trim() ? 'rgba(255,255,255,0.3)' : '#fff',
+              fontSize: 13, fontWeight: 600,
+              cursor: !cursorKey.trim() ? 'default' : 'pointer',
+            }}
+          >
+            {cursorSaving ? 'Saving…' : 'Save API key'}
+          </button>
         </div>
 
         {/* Google Gemini */}

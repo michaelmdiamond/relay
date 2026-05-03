@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { getValidAccessToken } from './openai-auth'
-import type { ChatMessage } from '../shared/types'
+import type { ChatMessage, TokenUsage } from '../shared/types'
+import { RELAY_SYSTEM_PROMPT } from './system-prompt'
 
 const CODEX_BASE = 'https://chatgpt.com/backend-api/codex'
 
@@ -73,10 +74,11 @@ export async function streamCodexMessage(
   messages: ChatMessage[],
   emit: {
     chunk: (text: string) => void
-    done: (fullText: string) => void
+    done: (fullText: string, usage?: TokenUsage, responseId?: string) => void
     error: (msg: string) => void
   },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  systemContext?: string
 ): Promise<void> {
   let auth: { accessToken: string; accountId?: string }
 
@@ -100,24 +102,52 @@ export async function streamCodexMessage(
     headers['ChatGPT-Account-Id'] = auth.accountId
   }
 
-  // The last user message is passed as `input`; prior messages as context via `previous_response_id`
-  // is not available here, so we use the full history as the input array.
-  const body = JSON.stringify({
+  const lastMessage = messages.at(-1)
+  const previousMessage = [...messages]
+    .slice(0, -1)
+    .reverse()
+    .find(message => message.role === 'assistant')
+  const previousResponseId =
+    lastMessage?.role === 'user' &&
+    previousMessage?.role === 'assistant'
+      ? previousMessage.openAIResponseId
+      : undefined
+
+  const baseBody = {
     model,
-    instructions: 'You are a helpful assistant.',
-    input: toResponsesInput(messages),
+    instructions: [RELAY_SYSTEM_PROMPT, systemContext].filter(Boolean).join('\n\n'),
     stream: true,
-    store: false,
-  })
+    store: true,
+  }
+
+  const buildBody = (usePreviousResponse: boolean): string => JSON.stringify(usePreviousResponse && previousResponseId
+    ? {
+      ...baseBody,
+      previous_response_id: previousResponseId,
+      input: toResponsesInput([lastMessage!]),
+    }
+    : {
+      ...baseBody,
+      input: toResponsesInput(messages),
+    }
+  )
 
   let res: Response
   try {
     res = await fetch(`${CODEX_BASE}/responses`, {
       method: 'POST',
       headers,
-      body,
+      body: buildBody(Boolean(previousResponseId)),
       signal: signal ?? AbortSignal.timeout(120_000),
     })
+    if (!res.ok && previousResponseId && (res.status === 400 || res.status === 404)) {
+      res = await fetch(`${CODEX_BASE}/responses`, {
+        method: 'POST',
+        headers,
+        body: buildBody(false),
+        signal: signal ?? AbortSignal.timeout(120_000),
+      })
+    }
   } catch (err) {
     emit.error(`Network error: ${err instanceof Error ? err.message : String(err)}`)
     return
@@ -139,6 +169,8 @@ export async function streamCodexMessage(
   const decoder = new TextDecoder()
   let accumulated = ''
   let buffer = ''
+  let usage: TokenUsage | undefined
+  let responseId: string | undefined
 
   try {
     while (true) {
@@ -158,11 +190,44 @@ export async function streamCodexMessage(
           const event = JSON.parse(data) as {
             type?: string
             delta?: string
+            response_id?: string
+            item?: {
+              id?: string
+            }
+            response?: {
+              id?: string
+              usage?: {
+                input_tokens?: number
+                output_tokens?: number
+                total_tokens?: number
+                input_tokens_details?: {
+                  cached_tokens?: number
+                }
+              }
+            }
           }
+
+          if (event.response?.id) responseId = event.response.id
+          if (event.response_id) responseId = event.response_id
 
           if (event.type === 'response.output_text.delta' && event.delta) {
             accumulated += event.delta
             emit.chunk(event.delta)
+          }
+
+          if (event.type === 'response.completed' && event.response?.usage) {
+            const inputTokens = event.response.usage.input_tokens ?? 0
+            const outputTokens = event.response.usage.output_tokens ?? 0
+            const cachedInputTokens = event.response.usage.input_tokens_details?.cached_tokens
+            usage = {
+              inputTokens,
+              outputTokens,
+              totalTokens: event.response.usage.total_tokens ?? (inputTokens + outputTokens),
+              ...(cachedInputTokens ? {
+                cachedInputTokens,
+                effectiveInputTokens: Math.max(0, inputTokens - cachedInputTokens),
+              } : {}),
+            }
           }
         } catch {
           // Malformed SSE line — skip
@@ -174,5 +239,5 @@ export async function streamCodexMessage(
     return
   }
 
-  emit.done(accumulated)
+  emit.done(accumulated, usage, responseId)
 }

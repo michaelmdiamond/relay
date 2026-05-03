@@ -20,7 +20,7 @@ const MODEL_PROVIDER: Record<AnyModel, Provider> = {
   'gemini-2.5-flash-lite': 'google',
 }
 
-const ANTHROPIC_FOR_CHOICE: Record<Exclude<ModelChoice, 'auto' | 'codex' | 'gemini'>, AnyModel> = {
+const ANTHROPIC_FOR_CHOICE: Record<Exclude<ModelChoice, 'auto' | 'codex' | 'gemini' | 'ollama' | 'cursor'>, AnyModel> = {
   haiku: 'claude-haiku-4-5-20251001',
   sonnet: 'claude-sonnet-4-6',
   opus: 'claude-opus-4-7',
@@ -43,13 +43,52 @@ function decide(model: AnyModel, reason: string, autoSelected: boolean): Routing
   }
 }
 
+function decideOllama(modelName: string, reason: string, autoSelected: boolean): RoutingDecision {
+  return {
+    model: modelName,
+    modelLabel: `Local (${modelName})`,
+    reason,
+    autoSelected,
+    provider: 'ollama',
+  }
+}
+
+function decideCursor(model: string, reason: string, autoSelected: boolean): RoutingDecision {
+  return {
+    model,
+    modelLabel: model === 'auto' ? 'Cursor Auto' : model === 'composer-2' ? 'Cursor Composer' : `Cursor ${model}`,
+    reason,
+    autoSelected,
+    provider: 'cursor',
+  }
+}
+
 export function route(
   messages: ChatMessage[],
   choice: ModelChoice,
   openAIConnected: boolean,
   geminiConnected: boolean,
-  geminiModel: GeminiModel = 'gemini-2.5-flash'
+  geminiModel: GeminiModel = 'gemini-2.5-flash',
+  ollamaConfigured: boolean = false,
+  ollamaModel: string = '',
+  cursorConfigured: boolean = false,
+  cursorModel: string = 'auto'
 ): RoutingDecision {
+  if (choice === 'cursor') {
+    if (!cursorConfigured) {
+      return decide('claude-sonnet-4-6', 'Cursor selected but not configured — using Sonnet', false)
+    }
+    return decideCursor(cursorModel, 'local Cursor SDK agent', false)
+  }
+
+  // Manual Ollama selection
+  if (choice === 'ollama') {
+    if (!ollamaConfigured) {
+      return decide('claude-haiku-4-5-20251001', 'Ollama selected but not configured — using Haiku', false)
+    }
+    return decideOllama(ollamaModel, 'manually selected', false)
+  }
+
   // Manual Codex selection
   if (choice === 'codex') {
     if (!openAIConnected) {
@@ -68,7 +107,7 @@ export function route(
 
   // Other manual selections
   if (choice !== 'auto') {
-    const model = ANTHROPIC_FOR_CHOICE[choice as Exclude<ModelChoice, 'auto' | 'codex' | 'gemini'>]
+    const model = ANTHROPIC_FOR_CHOICE[choice as Exclude<ModelChoice, 'auto' | 'codex' | 'gemini' | 'ollama' | 'cursor'>]
     return decide(model, 'manually selected', false)
   }
 
@@ -80,6 +119,11 @@ export function route(
   const lastTokens = estimateTokens(lastUser)
   const hasCode = CODE_RE.test(lastUser)
   const isComplex = COMPLEX_RE.test(lastUser)
+
+  // Local model: prefer for short, non-complex queries to conserve cloud tokens.
+  if (ollamaConfigured && ollamaModel && !hasCode && !isComplex && lastTokens < 500 && priorTokens < 2000) {
+    return decideOllama(ollamaModel, 'simple query — using local model', true)
+  }
 
   // When free providers are connected, prefer them over Anthropic credits.
   if (openAIConnected || geminiConnected) {

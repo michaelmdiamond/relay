@@ -1,269 +1,368 @@
-import { useEffect, useRef, useState } from 'react'
-import type { Conversation } from '../../../shared/types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  ConnectorInventory,
+  Conversation,
+} from '../../../shared/types'
 import { useChatStore } from '../store/chat'
 
 interface Props {
   onNew: () => void
 }
 
+interface ProjectGroup {
+  name: string
+  path?: string
+  conversations: Conversation[]
+}
+
+function projectKey(project: ProjectGroup): string {
+  return project.path ?? project.name
+}
+
+function sourceLabel(source?: Conversation['source']): string {
+  if (source === 'claude') return 'Claude'
+  if (source === 'codex') return 'Codex'
+  return 'Relay'
+}
+
+function formatRelativeTime(value: string): string {
+  const timestamp = new Date(value).getTime()
+  if (Number.isNaN(timestamp)) return ''
+
+  const diffMs = Date.now() - timestamp
+  const diffMinutes = Math.max(1, Math.floor(diffMs / 60000))
+  if (diffMinutes < 60) return `${diffMinutes}m`
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours}h`
+
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 7) return `${diffDays}d`
+
+  const diffWeeks = Math.floor(diffDays / 7)
+  return `${diffWeeks}w`
+}
+
+function PencilSquareIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M13.9 3.7a1.8 1.8 0 0 1 2.4 2.7l-8.6 7.8-3.4.7.9-3.3 8.7-7.9Z" />
+      <path d="M11.8 5.5 14.5 8" />
+      <path d="M9.2 3.8H6.4c-1.7 0-2.6 0-3.2.5-.6.6-.6 1.5-.6 3.2v6.1c0 1.7 0 2.6.6 3.2.6.6 1.5.6 3.2.6h6.1c1.7 0 2.6 0 3.2-.6.5-.6.5-1.5.5-3.2v-2.8" />
+    </svg>
+  )
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="8.5" cy="8.5" r="5.5" />
+      <path d="m12.5 12.5 4 4" />
+    </svg>
+  )
+}
+
+function PlugIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <rect x="3" y="3" width="5" height="5" rx="1.2" />
+      <rect x="12" y="3" width="5" height="5" rx="1.2" />
+      <rect x="3" y="12" width="5" height="5" rx="1.2" />
+      <rect x="12" y="12" width="5" height="5" rx="1.2" />
+      <path d="M8 5.5h4M5.5 8v4M14.5 8v4M8 14.5h4" />
+    </svg>
+  )
+}
+
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="10" cy="10" r="7" />
+      <path d="M10 6v4.2l2.8 1.8" />
+    </svg>
+  )
+}
+
+function ChartIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M3.5 15.5h13" />
+      <path d="M6 13V9" />
+      <path d="M10 13V5.5" />
+      <path d="M14 13v-3" />
+    </svg>
+  )
+}
+
+function FolderIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M2.5 6.2c0-1.4 1.1-2.5 2.5-2.5H7l1.4 1.6h6.5c1.7 0 2.6 0 3.2.5.6.6.6 1.5.6 3.2v3.8c0 1.7 0 2.6-.6 3.2-.6.6-1.5.6-3.2.6H5c-1.7 0-2.6 0-3.2-.6-.6-.6-.6-1.5-.6-3.2V6.2Z" />
+    </svg>
+  )
+}
+
+function SlidersIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M4 5h12M7 10h9M10 15h6" />
+      <circle cx="10" cy="5" r="1.4" />
+      <circle cx="5" cy="10" r="1.4" />
+      <circle cx="7.5" cy="15" r="1.4" />
+    </svg>
+  )
+}
+
+function countConnectorItems(inventory: ConnectorInventory | null): number {
+  if (!inventory) return 0
+  return inventory.providers.reduce((count, provider) => count + provider.items.length, 0)
+}
+
 export function Sidebar({ onNew }: Props) {
-  const { conversations, activeId, setActiveId, removeConversation } = useChatStore()
-  const [openAIEmail, setOpenAIEmail] = useState<string | null>(null)
-  const [connectingOpenAI, setConnectingOpenAI] = useState(false)
-  const [geminiConfigured, setGeminiConfigured] = useState(false)
-  const [geminiKeyOpen, setGeminiKeyOpen] = useState(false)
-  const [geminiKeyInput, setGeminiKeyInput] = useState('')
-  const [geminiKeyError, setGeminiKeyError] = useState('')
-  const geminiInputRef = useRef<HTMLInputElement>(null)
+  const { conversations, activeId, activePane, setActiveId, setActivePane, removeConversation } = useChatStore()
+  const [searchTerm, setSearchTerm] = useState('')
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({})
+  const [connectorInventory, setConnectorInventory] = useState<ConnectorInventory | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    window.api.getOpenAIAuthStatus().then(({ connected, email }) => {
-      setOpenAIEmail(connected ? (email ?? 'Connected') : null)
-    })
-    window.api.getGeminiKeyStatus().then(({ configured }) => {
-      setGeminiConfigured(configured)
-    })
+    window.api.getConnectorInventory().then(setConnectorInventory)
   }, [])
 
-  useEffect(() => {
-    if (geminiKeyOpen) geminiInputRef.current?.focus()
-  }, [geminiKeyOpen])
+  const filteredConversations = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase()
+    if (!query) return conversations
+    return conversations.filter((conv) => {
+      const haystack = [
+        conv.title,
+        conv.projectName,
+        conv.projectPath,
+        conv.messages.at(-1)?.content,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [conversations, searchTerm])
 
-  async function handleConnectOpenAI() {
-    setConnectingOpenAI(true)
-    try {
-      await window.api.startOpenAILogin()
-      const { connected, email } = await window.api.getOpenAIAuthStatus()
-      setOpenAIEmail(connected ? (email ?? 'Connected') : null)
-    } finally {
-      setConnectingOpenAI(false)
+  const grouped = useMemo(() => {
+    const projectMap = new Map<string, ProjectGroup>()
+    const unassigned: Conversation[] = []
+
+    filteredConversations.forEach((conv) => {
+      if (!conv.projectName) {
+        unassigned.push(conv)
+        return
+      }
+      const key = conv.projectPath ?? conv.projectName
+      const existing = projectMap.get(key)
+      if (existing) {
+        existing.conversations.push(conv)
+        return
+      }
+      projectMap.set(key, {
+        name: conv.projectName,
+        path: conv.projectPath,
+        conversations: [conv],
+      })
+    })
+
+    const projects = Array.from(projectMap.values()).sort((a, b) => {
+      const aNewest = a.conversations[0]?.createdAt ?? ''
+      const bNewest = b.conversations[0]?.createdAt ?? ''
+      return bNewest.localeCompare(aNewest)
+    })
+
+    return { projects, unassigned }
+  }, [filteredConversations])
+
+  const activeProjectKey = useMemo(() => {
+    for (const project of grouped.projects) {
+      if (project.conversations.some(conv => conv.id === activeId)) {
+        return projectKey(project)
+      }
     }
-  }
+    return null
+  }, [activeId, grouped.projects])
 
-  async function handleDisconnectOpenAI() {
-    await window.api.disconnectOpenAI()
-    setOpenAIEmail(null)
-  }
-
-  async function handleSaveGeminiKey() {
-    const trimmed = geminiKeyInput.trim()
-    if (!trimmed.startsWith('AIza')) {
-      setGeminiKeyError('Key should start with AIza')
-      return
-    }
-    await window.api.setGeminiKey(trimmed)
-    setGeminiConfigured(true)
-    setGeminiKeyOpen(false)
-    setGeminiKeyInput('')
-    setGeminiKeyError('')
-  }
-
-  async function handleDisconnectGemini() {
-    await window.api.disconnectGemini()
-    setGeminiConfigured(false)
-  }
-
-  async function handleDelete(e: React.MouseEvent, id: string) {
-    e.stopPropagation()
+  async function handleDelete(event: React.MouseEvent, id: string) {
+    event.stopPropagation()
     await window.api.deleteConversation(id)
     removeConversation(id)
   }
 
+  function handleToggleProject(project: ProjectGroup) {
+    const key = projectKey(project)
+    setCollapsedProjects((current) => ({
+      ...current,
+      [key]: !current[key],
+    }))
+  }
+
   return (
-    <div style={{
-      width: 220,
-      borderRight: '1px solid rgba(255,255,255,0.06)',
-      display: 'flex',
-      flexDirection: 'column',
-      background: 'rgba(0,0,0,0.15)',
-    }}>
-      <div style={{
-        padding: '52px 12px 8px',
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
-      }}>
-        <button
-          onClick={onNew}
-          style={{
-            width: '100%',
-            padding: '7px 12px',
-            borderRadius: 8,
-            border: '1px solid rgba(255,255,255,0.12)',
-            background: 'transparent',
-            color: 'rgba(255,255,255,0.7)',
-            fontSize: 13,
-            cursor: 'pointer',
-            textAlign: 'left',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>
-          New conversation
+    <aside className="relay-sidebar">
+      <div className="relay-sidebar__top">
+        <button type="button" className="relay-nav-action relay-nav-action--primary" onClick={onNew}>
+          <span className="relay-nav-action__icon"><PencilSquareIcon /></span>
+          <span className="relay-nav-action__label">New chat</span>
         </button>
+
+        <button
+          type="button"
+          className={`relay-nav-action${activePane === 'usage' ? ' is-active' : ''}`}
+          onClick={() => setActivePane('usage')}
+        >
+          <span className="relay-nav-action__icon"><ChartIcon /></span>
+          <span className="relay-nav-action__label">Usage</span>
+          <span className="relay-nav-action__meta">Live</span>
+        </button>
+
+        <button
+          type="button"
+          className={`relay-nav-action${activePane === 'connections' ? ' is-active' : ''}`}
+          onClick={() => setActivePane('connections')}
+        >
+          <span className="relay-nav-action__icon"><PlugIcon /></span>
+          <span className="relay-nav-action__label">Connections</span>
+          <span className="relay-nav-action__meta">{countConnectorItems(connectorInventory)}</span>
+        </button>
+
+        <button type="button" className="relay-nav-action relay-nav-action--muted">
+          <span className="relay-nav-action__icon"><ClockIcon /></span>
+          <span className="relay-nav-action__label">Automations</span>
+          <span className="relay-nav-action__meta">Soon</span>
+        </button>
+
+        <div className="relay-search-shell">
+          <SearchIcon />
+          <input
+            ref={searchInputRef}
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className="relay-search-input"
+            placeholder="Search chats and projects"
+          />
+        </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px', minHeight: 0 }}>
-        {conversations.map((conv: Conversation) => (
-          <div
-            key={conv.id}
-            onClick={() => setActiveId(conv.id)}
-            style={{
-              padding: '7px 10px',
-              borderRadius: 7,
-              cursor: 'pointer',
-              background: conv.id === activeId ? 'rgba(255,255,255,0.1)' : 'transparent',
-              color: conv.id === activeId ? '#fff' : 'rgba(255,255,255,0.55)',
-              fontSize: 13,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 4,
-              marginBottom: 1,
-              transition: 'background 0.1s',
-            }}
-          >
-            <span style={{
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              flex: 1,
-            }}>
-              {conv.title}
-            </span>
-            <button
-              onClick={(e) => handleDelete(e, conv.id)}
-              style={{
-                flexShrink: 0,
-                background: 'transparent',
-                border: 'none',
-                color: 'rgba(255,255,255,0.25)',
-                cursor: 'pointer',
-                fontSize: 13,
-                padding: '0 2px',
-                lineHeight: 1,
-                borderRadius: 3,
-              }}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-      </div>
+      <div className="relay-sidebar__content">
+        <>
+            <section className="relay-sidebar-section">
+              <div className="relay-sidebar-section__header">
+                <span className="relay-sidebar-section__label">Projects</span>
+                <span className="relay-sidebar-section__tools">
+                  <SlidersIcon />
+                </span>
+              </div>
 
-      {/* Provider connection footer */}
-      <div style={{
-        padding: '8px 12px 12px',
-        borderTop: '1px solid rgba(255,255,255,0.06)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-      }}>
-        {/* OpenAI */}
-        {openAIEmail ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {openAIEmail}
-              </span>
-            </div>
-            <button onClick={handleDisconnectOpenAI} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.25)', fontSize: 11, cursor: 'pointer', textAlign: 'left', padding: 0 }}>
-              Disconnect OpenAI
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={handleConnectOpenAI}
-            disabled={connectingOpenAI}
-            style={{
-              width: '100%', padding: '6px 10px', borderRadius: 7,
-              border: '1px solid rgba(245,158,11,0.25)', background: 'rgba(245,158,11,0.08)',
-              color: connectingOpenAI ? 'rgba(255,255,255,0.3)' : 'rgba(245,158,11,0.8)',
-              fontSize: 12, cursor: connectingOpenAI ? 'default' : 'pointer', textAlign: 'left',
-            }}
-          >
-            {connectingOpenAI ? 'Opening browser…' : 'Connect OpenAI (Codex)'}
-          </button>
-        )}
+              {grouped.projects.length === 0 && (
+                <div className="relay-sidebar-empty">No project threads yet.</div>
+              )}
 
-        {/* Gemini */}
-        {geminiConfigured ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
-                Gemini connected
-              </span>
-            </div>
-            <button onClick={handleDisconnectGemini} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.25)', fontSize: 11, cursor: 'pointer', textAlign: 'left', padding: 0 }}>
-              Disconnect Gemini
-            </button>
-          </div>
-        ) : geminiKeyOpen ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <input
-              ref={geminiInputRef}
-              type="password"
-              value={geminiKeyInput}
-              onChange={e => { setGeminiKeyInput(e.target.value); setGeminiKeyError('') }}
-              onKeyDown={e => {
-                if (e.key === 'Enter') handleSaveGeminiKey()
-                if (e.key === 'Escape') { setGeminiKeyOpen(false); setGeminiKeyInput(''); setGeminiKeyError('') }
-              }}
-              placeholder="AIza..."
-              style={{
-                padding: '6px 8px',
-                borderRadius: 6,
-                border: `1px solid ${geminiKeyError ? 'rgba(248,113,113,0.5)' : 'rgba(52,211,153,0.3)'}`,
-                background: 'rgba(52,211,153,0.05)',
-                color: '#fff',
-                fontSize: 12,
-                outline: 'none',
-                fontFamily: 'monospace',
-              }}
-            />
-            {geminiKeyError && <p style={{ margin: 0, color: '#f87171', fontSize: 11 }}>{geminiKeyError}</p>}
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button
-                onClick={handleSaveGeminiKey}
-                disabled={!geminiKeyInput.trim()}
-                style={{
-                  flex: 1, padding: '5px', borderRadius: 6, border: 'none',
-                  background: geminiKeyInput.trim() ? 'rgba(52,211,153,0.7)' : 'rgba(255,255,255,0.08)',
-                  color: geminiKeyInput.trim() ? '#fff' : 'rgba(255,255,255,0.3)',
-                  fontSize: 11, fontWeight: 600, cursor: geminiKeyInput.trim() ? 'pointer' : 'default',
-                }}
-              >
-                Save
-              </button>
-              <button
-                onClick={() => { setGeminiKeyOpen(false); setGeminiKeyInput(''); setGeminiKeyError('') }}
-                style={{
-                  padding: '5px 8px', borderRadius: 6, border: 'none',
-                  background: 'rgba(255,255,255,0.06)',
-                  color: 'rgba(255,255,255,0.4)',
-                  fontSize: 11, cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => setGeminiKeyOpen(true)}
-            style={{
-              width: '100%', padding: '6px 10px', borderRadius: 7,
-              border: '1px solid rgba(52,211,153,0.25)', background: 'rgba(52,211,153,0.08)',
-              color: 'rgba(52,211,153,0.8)',
-              fontSize: 12, cursor: 'pointer', textAlign: 'left',
-            }}
-          >
-            Connect Gemini
-          </button>
-        )}
+              {grouped.projects.map((project) => {
+                const key = projectKey(project)
+                const isActiveProject = key === activeProjectKey
+                const isCollapsed = isActiveProject ? false : (collapsedProjects[key] ?? true)
+
+                return (
+                  <div key={key} className="relay-project-group">
+                    <button
+                      type="button"
+                      className="relay-project-group__title"
+                      onClick={() => handleToggleProject(project)}
+                    >
+                      <span className={`relay-project-group__chevron${isCollapsed ? ' is-collapsed' : ''}`}>▾</span>
+                      <span className="relay-project-group__icon"><FolderIcon /></span>
+                      <span className="relay-project-group__name">{project.name}</span>
+                      <span className="relay-project-group__count">{project.conversations.length}</span>
+                    </button>
+
+                    {!isCollapsed && (
+                      <div className="relay-project-group__list">
+                        {project.conversations.map((conv) => {
+                          const isActive = conv.id === activeId
+                          return (
+                            <button
+                              key={conv.id}
+                              type="button"
+                              className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
+                              onClick={() => setActiveId(conv.id)}
+                            >
+                              <span className="relay-conversation-item__main">
+                                {isActive && <span className="relay-conversation-item__dot" />}
+                                <span className="relay-conversation-item__text">
+                                  <span className="relay-conversation-item__title">{conv.title}</span>
+                                  <span className={`relay-conversation-item__source source-${conv.source ?? 'relay'}`}>
+                                    {sourceLabel(conv.source)}
+                                  </span>
+                                </span>
+                              </span>
+                              <span className="relay-conversation-item__side">
+                                <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
+                                {!conv.readOnly && (
+                                  <span
+                                    className="relay-conversation-item__delete"
+                                    onClick={(event) => void handleDelete(event, conv.id)}
+                                  >
+                                    ×
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </section>
+
+            {grouped.unassigned.length > 0 && (
+              <section className="relay-sidebar-section">
+                <div className="relay-sidebar-section__header">
+                  <span className="relay-sidebar-section__label">Chats</span>
+                </div>
+
+                <div className="relay-project-group__list">
+                  {grouped.unassigned.map((conv) => {
+                    const isActive = conv.id === activeId
+                    return (
+                      <button
+                        key={conv.id}
+                        type="button"
+                        className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
+                        onClick={() => setActiveId(conv.id)}
+                      >
+                        <span className="relay-conversation-item__main">
+                          {isActive && <span className="relay-conversation-item__dot" />}
+                          <span className="relay-conversation-item__text">
+                            <span className="relay-conversation-item__title">{conv.title}</span>
+                            <span className={`relay-conversation-item__source source-${conv.source ?? 'relay'}`}>
+                              {sourceLabel(conv.source)}
+                            </span>
+                          </span>
+                        </span>
+                        <span className="relay-conversation-item__side">
+                          <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
+                          {!conv.readOnly && (
+                            <span
+                              className="relay-conversation-item__delete"
+                              onClick={(event) => void handleDelete(event, conv.id)}
+                            >
+                              ×
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+        </>
       </div>
-    </div>
+    </aside>
   )
 }

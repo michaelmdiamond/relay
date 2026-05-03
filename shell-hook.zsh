@@ -1,6 +1,6 @@
 # sessionboard shell integration
 # Add this to your ~/.zshrc:
-#   source /Users/michaeldiamond/sessionboard-app/shell-hook.zsh
+#   source /path/to/sessionboard-app/shell-hook.zsh
 
 _SB_SOCK="$HOME/.sessionboard/agent.sock"
 
