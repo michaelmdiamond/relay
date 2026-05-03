@@ -77,7 +77,7 @@ function aggregateRows(events: UsageEvent[], keyFor: (event: UsageEvent) => stri
     buckets.set(key, existing)
   }
 
-  return [...buckets.values()].sort((a, b) => b.totalTokens - a.totalTokens)
+  return [...buckets.values()].sort((a, b) => b.effectiveTotalTokens - a.effectiveTotalTokens)
 }
 
 function summarizeUsage(conversations: Conversation[]): UsageSnapshot {
@@ -94,7 +94,7 @@ function summarizeUsage(conversations: Conversation[]): UsageSnapshot {
 
       conversationIds.add(conversation.id)
       const cached = message.usage.cachedInputTokens ?? 0
-      const effective = message.usage.effectiveInputTokens ?? (message.usage.inputTokens - cached)
+      const effective = message.usage.effectiveInputTokens ?? Math.max(0, message.usage.inputTokens - cached)
       events.push({
         provider: message.routing.provider,
         model: message.routing.model,
@@ -331,7 +331,7 @@ export function UsageDashboard({ conversations }: Props) {
               Monthly limits
             </div>
             <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.62)' }}>
-              Set token caps for this month and compare tracked usage against them.
+              Set token caps for this month and compare effective usage against them.
             </div>
           </div>
 
@@ -387,25 +387,25 @@ export function UsageDashboard({ conversations }: Props) {
           </div>
 
           <div style={{ display: 'grid', gap: 10 }}>
-            <LimitBar label="Overall" used={snapshot.currentMonth.totalTokens} limit={limits.overallMonthlyTokens} />
+            <LimitBar label="Overall" used={snapshot.currentMonth.effectiveTotalTokens} limit={limits.overallMonthlyTokens} />
             <LimitBar
               label="Anthropic"
-              used={snapshot.byProvider.find(row => row.key === 'anthropic')?.totalTokens ?? 0}
+              used={snapshot.byProvider.find(row => row.key === 'anthropic')?.effectiveTotalTokens ?? 0}
               limit={limits.anthropicMonthlyTokens}
             />
             <LimitBar
               label="OpenAI"
-              used={snapshot.byProvider.find(row => row.key === 'openai')?.totalTokens ?? 0}
+              used={snapshot.byProvider.find(row => row.key === 'openai')?.effectiveTotalTokens ?? 0}
               limit={limits.openaiMonthlyTokens}
             />
             <LimitBar
               label="Google"
-              used={snapshot.byProvider.find(row => row.key === 'google')?.totalTokens ?? 0}
+              used={snapshot.byProvider.find(row => row.key === 'google')?.effectiveTotalTokens ?? 0}
               limit={limits.googleMonthlyTokens}
             />
             <LimitBar
               label="Ollama"
-              used={snapshot.byProvider.find(row => row.key === 'ollama')?.totalTokens ?? 0}
+              used={snapshot.byProvider.find(row => row.key === 'ollama')?.effectiveTotalTokens ?? 0}
               limit={limits.ollamaMonthlyTokens}
             />
           </div>

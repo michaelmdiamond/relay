@@ -223,6 +223,17 @@ body {
 
 .app-body { flex: 1; overflow: hidden; display: flex; }
 
+.app-section {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.app-section[hidden] {
+  display: none;
+}
+
 /* ── Toolbar ────────────────────────────────────────────────── */
 
 .toolbar {
@@ -659,6 +670,34 @@ body {
 .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .tab-status { font-size: 10px; flex-shrink: 0; margin-left: 6px; }
 
+.terminal-tab__close {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  border-radius: 6px;
+  color: rgba(255,255,255,0.38);
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+}
+
+.terminal-tab:hover .terminal-tab__close,
+.terminal-tab.active .terminal-tab__close,
+.terminal-tab__close:focus-visible {
+  opacity: 1;
+}
+
+.terminal-tab__close:hover,
+.terminal-tab__close:focus-visible {
+  background: rgba(248,113,113,0.16);
+  color: rgba(254,202,202,0.95);
+  outline: none;
+}
+
 .tab--in_progress .tab-status { color: var(--blue); }
 .tab--needs_input .tab-status { color: var(--amber); }
 .tab--done .tab-status { color: var(--green); }
@@ -681,6 +720,10 @@ body {
   position: absolute;
   inset: 8px;
   overflow: hidden;
+}
+
+.terminal-session-wrapper--opaque {
+  background: #070711;
 }
 
 .terminal-session-container {

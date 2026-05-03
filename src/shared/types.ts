@@ -190,7 +190,7 @@ export interface Conversation {
   memory?: ConversationMemory
 }
 
-export type TerminalLauncherId = 'codex' | 'claude' | 'shell'
+export type TerminalLauncherId = 'codex' | 'claude' | 'gemini' | 'cursor' | 'shell'
 
 export type WorkflowAgentProvider = 'anthropic' | 'openai' | 'google'
 export type WorkflowAgentRole = 'implementer' | 'reviewer'

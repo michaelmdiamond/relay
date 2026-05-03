@@ -210,18 +210,6 @@ export function Sidebar({ onNew }: Props) {
 
         <button
           type="button"
-          className={`relay-nav-action${activePane === 'conversation' ? ' is-active' : ''}`}
-          onClick={() => {
-            setActivePane('conversation')
-            searchInputRef.current?.focus()
-          }}
-        >
-          <span className="relay-nav-action__icon"><SearchIcon /></span>
-          <span className="relay-nav-action__label">Search</span>
-        </button>
-
-        <button
-          type="button"
           className={`relay-nav-action${activePane === 'usage' ? ' is-active' : ''}`}
           onClick={() => setActivePane('usage')}
         >

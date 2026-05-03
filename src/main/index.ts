@@ -197,9 +197,13 @@ ipcMain.handle('terminal-create', (_e, id: string, launcherId: TerminalLauncherI
   const shell = process.env.SHELL ?? '/bin/zsh'
   const codexBin = findCliTool('codex')
   const claudeBin = findCliTool('claude')
+  const geminiBin = findCliTool('gemini')
+  const cursorAgentBin = findCliTool('cursor-agent')
   const launcherMap: Record<TerminalLauncherId, { file: string; args: string[] }> = {
     codex: { file: shell, args: ['-l', '-c', `exec "${codexBin}"`] },
     claude: { file: shell, args: ['-l', '-c', `exec "${claudeBin}"`] },
+    gemini: { file: shell, args: ['-l', '-c', `exec "${geminiBin}"`] },
+    cursor: { file: shell, args: ['-l', '-c', `exec "${cursorAgentBin}"`] },
     shell: { file: shell, args: ['-l'] },
   }
   const { file, args } = launcherMap[launcherId]

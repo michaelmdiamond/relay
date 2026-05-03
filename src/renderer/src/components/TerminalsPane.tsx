@@ -41,6 +41,24 @@ const launchers: Launcher[] = [
     sessionLabel: 'Claude Session',
   },
   {
+    id: 'gemini',
+    name: 'Gemini CLI Agent',
+    status: 'google',
+    headline: 'Start a Gemini CLI agent',
+    detail: 'Use this when you want a Google Gemini command-line agent working directly in the selected project folder.',
+    cta: 'New Gemini session',
+    sessionLabel: 'Gemini Session',
+  },
+  {
+    id: 'cursor',
+    name: 'Cursor Agent',
+    status: 'cursor',
+    headline: 'Launch a Cursor agent session',
+    detail: 'Use this for Cursor-managed coding work from a live terminal session.',
+    cta: 'New Cursor session',
+    sessionLabel: 'Cursor Session',
+  },
+  {
     id: 'shell',
     name: 'Local Shell',
     status: 'manual',
@@ -60,6 +78,7 @@ function TerminalView({ session, active }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const termRef = useRef<Terminal | null>(null)
+  const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -71,7 +90,7 @@ function TerminalView({ session, active }: TerminalViewProps) {
       cursorBlink: true,
       allowTransparency: true,
       theme: {
-        background: '#00000000',
+        background: session.launcherId === 'gemini' ? '#070711' : '#00000000',
         foreground: '#e2e8f0',
         cursor: '#e2e8f0',
         selectionBackground: '#4a5568',
@@ -101,17 +120,31 @@ function TerminalView({ session, active }: TerminalViewProps) {
     termRef.current = term
 
     // Give Electron time to finish layout before fit/focus
-    setTimeout(() => {
+    const fitTerminal = () => {
+      if (!containerRef.current || containerRef.current.clientWidth === 0 || containerRef.current.clientHeight === 0) return
       fitAddon.fit()
+      const { cols, rows } = term
+      const lastSize = lastSizeRef.current
+      if (!lastSize || lastSize.cols !== cols || lastSize.rows !== rows) {
+        lastSizeRef.current = { cols, rows }
+        window.terminalApi.resizeTerminal(session.id, cols, rows)
+      }
+    }
+
+    setTimeout(() => {
+      fitTerminal()
       term.focus()
     }, 50)
 
     window.terminalApi.createTerminal(session.id, session.launcherId, session.cwd)
 
     const onDataDispose = term.onData((data) => window.terminalApi.sendTerminalInput(session.id, data))
-    const onResizeDispose = term.onResize(({ cols, rows }) =>
-      window.terminalApi.resizeTerminal(session.id, cols, rows),
-    )
+    const onResizeDispose = term.onResize(({ cols, rows }) => {
+      const lastSize = lastSizeRef.current
+      if (lastSize?.cols === cols && lastSize.rows === rows) return
+      lastSizeRef.current = { cols, rows }
+      window.terminalApi.resizeTerminal(session.id, cols, rows)
+    })
 
     const unsubData = window.terminalApi.onTerminalData((id, data) => {
       if (id === session.id) term.write(data)
@@ -122,10 +155,18 @@ function TerminalView({ session, active }: TerminalViewProps) {
         term.write(`\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`)
     })
 
-    const ro = new ResizeObserver(() => fitAddon.fit())
+    let resizeFrame: number | null = null
+    const ro = new ResizeObserver(() => {
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = null
+        fitTerminal()
+      })
+    })
     ro.observe(containerRef.current)
 
     return () => {
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
       onDataDispose.dispose()
       onResizeDispose.dispose()
       unsubData()
@@ -139,7 +180,16 @@ function TerminalView({ session, active }: TerminalViewProps) {
   useEffect(() => {
     if (active) {
       requestAnimationFrame(() => {
+        const term = termRef.current
         fitAddonRef.current?.fit()
+        if (term) {
+          const { cols, rows } = term
+          const lastSize = lastSizeRef.current
+          if (!lastSize || lastSize.cols !== cols || lastSize.rows !== rows) {
+            lastSizeRef.current = { cols, rows }
+            window.terminalApi.resizeTerminal(session.id, cols, rows)
+          }
+        }
         termRef.current?.focus()
       })
     }
@@ -147,7 +197,7 @@ function TerminalView({ session, active }: TerminalViewProps) {
 
   return (
     <div
-      className="terminal-session-wrapper"
+      className={`terminal-session-wrapper${session.launcherId === 'gemini' ? ' terminal-session-wrapper--opaque' : ''}`}
       style={{ display: active ? 'block' : 'none' }}
       onClick={() => termRef.current?.focus()}
     >
@@ -184,6 +234,18 @@ export function TerminalsPane() {
     setActiveSessionId(session.id)
   }
 
+  function handleCloseSession(sessionId: string) {
+    window.terminalApi.killTerminal(sessionId)
+    setSessions((current) => {
+      const nextSessions = current.filter((session) => session.id !== sessionId)
+      setActiveSessionId((activeId) => {
+        if (activeId !== sessionId) return activeId
+        return nextSessions[0]?.id ?? null
+      })
+      return nextSessions
+    })
+  }
+
   return (
     <div className="terminals-view">
       <aside className="terminals-sidebar">
@@ -210,6 +272,24 @@ export function TerminalsPane() {
                   {session.cwd.split('/').at(-1)}
                 </span>
               )}
+            </span>
+            <span
+              role="button"
+              aria-label={`Close ${session.name}`}
+              className="terminal-tab__close"
+              tabIndex={0}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleCloseSession(session.id)
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                event.stopPropagation()
+                handleCloseSession(session.id)
+              }}
+            >
+              ×
             </span>
           </button>
         ))}

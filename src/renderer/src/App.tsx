@@ -97,16 +97,16 @@ export default function App() {
       </div>
 
       <div className="app-body">
-        {activeTab === 'chats' ? (
-          <>
-            <Sidebar onNew={handleNew} />
-            <ChatPane />
-          </>
-        ) : activeTab === 'workflows' ? (
+        <div className="app-section" hidden={activeTab !== 'chats'}>
+          <Sidebar onNew={handleNew} />
+          <ChatPane />
+        </div>
+        <div className="app-section" hidden={activeTab !== 'workflows'}>
           <WorkflowsPane />
-        ) : (
+        </div>
+        <div className="app-section" hidden={activeTab !== 'terminals'}>
           <TerminalsPane />
-        )}
+        </div>
       </div>
     </div>
   )

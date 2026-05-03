@@ -350,15 +350,6 @@ export function ChatPane() {
         </div>
       )}
 
-      {!readOnly && (
-        <MemoryPanel
-          memory={conversation.memory ?? {}}
-          onSave={handleMemorySave}
-          onCompact={handleCompact}
-          onWorkflowHandoff={handleWorkflowHandoff}
-        />
-      )}
-
       <div style={{
         flex: 1,
         overflowY: 'auto',
