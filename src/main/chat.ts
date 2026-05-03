@@ -15,6 +15,7 @@ import { streamOllamaMessage } from './ollama'
 import { getCursorModel, isCursorConnected } from './cursor-auth'
 import { streamCursorAgentMessage } from './cursor-agent'
 import { RELAY_SYSTEM_PROMPT } from './system-prompt'
+import { writePrivateJson } from './private-json'
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json')
 const STORE_PATH = path.join(app.getPath('userData'), 'conversations.json')
@@ -90,7 +91,7 @@ function readConfig(): { apiKey?: string } {
 }
 
 function writeConfig(cfg: { apiKey?: string }): void {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2))
+  writePrivateJson(CONFIG_PATH, cfg)
 }
 
 function readStore(): Conversation[] {
@@ -104,7 +105,7 @@ function readStore(): Conversation[] {
 }
 
 function writeStore(convs: Conversation[]): void {
-  fs.writeFileSync(STORE_PATH, JSON.stringify(convs, null, 2))
+  writePrivateJson(STORE_PATH, convs)
 }
 
 function deriveProjectFromPath(projectPath?: string): { name?: string; projectPath?: string } {

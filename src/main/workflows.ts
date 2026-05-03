@@ -5,6 +5,7 @@ import * as path from 'path'
 import { randomUUID } from 'crypto'
 import { getGeminiApiKey } from './gemini-auth'
 import { getValidAccessToken } from './openai-auth'
+import { writePrivateJson } from './private-json'
 import type {
   AgentProfile,
   WorkflowArtifact,
@@ -100,7 +101,7 @@ function readStore(): WorkflowStore {
 }
 
 function writeStore(store: WorkflowStore): void {
-  fs.writeFileSync(STORE_PATH, JSON.stringify(store, null, 2))
+  writePrivateJson(STORE_PATH, store)
 }
 
 function updateStore(mutator: (store: WorkflowStore) => WorkflowStore): WorkflowStore {

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
+import { writePrivateJson } from './private-json'
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'ollama-config.json')
 
@@ -16,7 +17,7 @@ function readConfig(): OllamaConfig | null {
 }
 
 function writeConfig(cfg: OllamaConfig): void {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 })
+  writePrivateJson(CONFIG_PATH, cfg)
 }
 
 export function getOllamaConfig(): OllamaConfig | null {

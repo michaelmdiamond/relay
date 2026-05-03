@@ -2,6 +2,7 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import type { UsageLimitSettings } from '../shared/types'
+import { writePrivateJson } from './private-json'
 
 const LIMITS_PATH = path.join(app.getPath('userData'), 'usage-limits.json')
 
@@ -40,6 +41,6 @@ export function getUsageLimits(): UsageLimitSettings {
 
 export function saveUsageLimits(limits: UsageLimitSettings): UsageLimitSettings {
   const normalized = normalizeLimits(limits)
-  fs.writeFileSync(LIMITS_PATH, JSON.stringify(normalized, null, 2))
+  writePrivateJson(LIMITS_PATH, normalized)
   return normalized
 }
