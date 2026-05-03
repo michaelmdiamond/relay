@@ -2,6 +2,7 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import type { GeminiModel } from '../shared/types'
+import { writePrivateJson } from './private-json'
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'gemini-config.json')
 
@@ -17,7 +18,7 @@ function readConfig(): GeminiConfig | null {
 }
 
 function writeConfig(cfg: GeminiConfig): void {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 })
+  writePrivateJson(CONFIG_PATH, cfg)
 }
 
 function clearConfig(): void {

@@ -4,6 +4,7 @@ import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
 import type { OpenAICredentials } from '../shared/types'
+import { writePrivateJson } from './private-json'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ export function readCredentials(): OpenAICredentials | null {
 }
 
 function writeCredentials(creds: OpenAICredentials): void {
-  fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(creds, null, 2))
+  writePrivateJson(CREDENTIALS_PATH, creds)
 }
 
 export function clearCredentials(): void {

@@ -3,6 +3,7 @@ dist/
 *.log
 npm-debug.log*
 .DS_Store
+.claude/
 .env
 .env.*
 !.env.example
@@ -24,6 +25,11 @@ npm-debug.log*
 secrets.*
 *.sqlite
 *.db
+config.json
+conversations.json
 openai-credentials.json
+cursor-config.json
 gemini-config.json
 ollama-config.json
+usage-limits.json
+workflow-store.json

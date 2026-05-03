@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
+import { writePrivateJson } from './private-json'
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'cursor-config.json')
 
@@ -19,7 +20,7 @@ function readConfig(): CursorConfig | null {
 }
 
 function writeConfig(cfg: CursorConfig): void {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 })
+  writePrivateJson(CONFIG_PATH, cfg)
 }
 
 export function getCursorApiKey(): string | null {
