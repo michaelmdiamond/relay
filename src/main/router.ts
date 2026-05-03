@@ -1,20 +1,30 @@
 import type { AnyModel, ChatMessage, GeminiModel, ModelChoice, Provider, RoutingDecision } from '../shared/types'
 
-const MODEL_LABELS: Record<AnyModel, string> = {
+const MODEL_LABELS: Partial<Record<string, string>> = {
   'claude-haiku-4-5-20251001': 'Haiku',
   'claude-sonnet-4-6': 'Sonnet',
   'claude-opus-4-7': 'Opus',
+  'gpt-5.5': 'GPT-5.5',
+  'gpt-5.4': 'GPT-5.4',
+  'gpt-5.4-mini': 'GPT-5.4 Mini',
   'gpt-5.3-codex': 'Codex',
+  'gpt-5.2': 'GPT-5.2',
+  'gpt-5.1-codex': 'GPT-5.1 Codex',
   'gemini-2.5-pro': 'Gemini Pro',
   'gemini-2.5-flash': 'Gemini Flash',
   'gemini-2.5-flash-lite': 'Gemini Flash-Lite',
 }
 
-const MODEL_PROVIDER: Record<AnyModel, Provider> = {
+const MODEL_PROVIDER: Partial<Record<string, Provider>> = {
   'claude-haiku-4-5-20251001': 'anthropic',
   'claude-sonnet-4-6': 'anthropic',
   'claude-opus-4-7': 'anthropic',
+  'gpt-5.5': 'openai',
+  'gpt-5.4': 'openai',
+  'gpt-5.4-mini': 'openai',
   'gpt-5.3-codex': 'openai',
+  'gpt-5.2': 'openai',
+  'gpt-5.1-codex': 'openai',
   'gemini-2.5-pro': 'google',
   'gemini-2.5-flash': 'google',
   'gemini-2.5-flash-lite': 'google',
@@ -33,13 +43,17 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
 
-function decide(model: AnyModel, reason: string, autoSelected: boolean): RoutingDecision {
+function labelForModel(model: string): string {
+  return MODEL_LABELS[model] ?? (model.includes('codex') ? 'Codex' : model)
+}
+
+function decide(model: string, reason: string, autoSelected: boolean, provider?: Provider): RoutingDecision {
   return {
     model,
-    modelLabel: MODEL_LABELS[model],
+    modelLabel: labelForModel(model),
     reason,
     autoSelected,
-    provider: MODEL_PROVIDER[model],
+    provider: provider ?? MODEL_PROVIDER[model] ?? 'anthropic',
   }
 }
 
@@ -68,6 +82,7 @@ export function route(
   choice: ModelChoice,
   openAIConnected: boolean,
   geminiConnected: boolean,
+  codexModel: string = 'gpt-5.5',
   geminiModel: GeminiModel = 'gemini-2.5-flash',
   ollamaConfigured: boolean = false,
   ollamaModel: string = '',
@@ -94,7 +109,7 @@ export function route(
     if (!openAIConnected) {
       return decide('claude-sonnet-4-6', 'Codex selected but OpenAI not connected — using Sonnet', false)
     }
-    return decide('gpt-5.3-codex', 'manually selected', false)
+    return decide(codexModel, 'manually selected', false, 'openai')
   }
 
   // Manual Gemini selection
@@ -131,12 +146,12 @@ export function route(
       return decide('claude-opus-4-7', 'large context — using Opus', true)
     }
     if (hasCode && openAIConnected) {
-      return decide('gpt-5.3-codex', 'code task', true)
+      return decide(codexModel, 'code task', true, 'openai')
     }
     if (geminiConnected) {
       return decide(geminiModel, isComplex ? 'complex task' : 'default', true)
     }
-    return decide('gpt-5.3-codex', hasCode ? 'code task' : 'default', true)
+    return decide(codexModel, hasCode ? 'code task' : 'default', true, 'openai')
   }
 
   // No free providers — route across Anthropic models by complexity

@@ -26,6 +26,9 @@ const api: ChatApi = {
   getOpenAIAuthStatus: () => ipcRenderer.invoke('get-openai-auth-status'),
   startOpenAILogin: () => ipcRenderer.invoke('start-openai-login'),
   disconnectOpenAI: () => ipcRenderer.invoke('disconnect-openai'),
+  getCodexModel: () => ipcRenderer.invoke('get-codex-model'),
+  setCodexModel: (model) => ipcRenderer.invoke('set-codex-model', model),
+  getCodexModels: () => ipcRenderer.invoke('get-codex-models'),
 
   getGeminiKeyStatus: () => ipcRenderer.invoke('get-gemini-key-status'),
   setGeminiKey: (key) => ipcRenderer.invoke('set-gemini-key', key),

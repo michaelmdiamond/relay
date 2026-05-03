@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { CODEX_MODELS } from '../../../shared/types'
 import type { ConnectorProviderSnapshot, SkillEntry } from '../../../shared/types'
 
 // ── Provider config ───────────────────────────────────────────────
@@ -15,7 +16,7 @@ interface ProviderConfig {
 
 const PROVIDERS: ProviderConfig[] = [
   { id: 'claude',  label: 'Claude',       accent: 'rgba(255,196,122,0.85)', accentDim: 'rgba(255,196,122,0.07)', connectorKey: 'claude', skillKey: 'claude', staticModels: ['Haiku', 'Sonnet', 'Opus'] },
-  { id: 'openai',  label: 'OpenAI Codex', accent: 'rgba(92,200,122,0.85)',  accentDim: 'rgba(92,200,122,0.07)',  connectorKey: 'codex',  skillKey: 'codex',  staticModels: ['gpt-5.3-codex'] },
+  { id: 'openai',  label: 'OpenAI Codex', accent: 'rgba(92,200,122,0.85)',  accentDim: 'rgba(92,200,122,0.07)',  connectorKey: 'codex',  skillKey: 'codex',  staticModels: [...CODEX_MODELS] },
   { id: 'gemini',  label: 'Gemini',       accent: 'rgba(125,184,255,0.85)', accentDim: 'rgba(125,184,255,0.07)', connectorKey: 'gemini', skillKey: null,      staticModels: ['2.5 Pro', 'Flash', 'Flash-Lite'] },
   { id: 'ollama',  label: 'Ollama',       accent: 'rgba(111,212,255,0.85)', accentDim: 'rgba(111,212,255,0.07)', connectorKey: null,     skillKey: null,      staticModels: [] },
   { id: 'cursor',  label: 'Cursor',       accent: 'rgba(244,114,182,0.85)', accentDim: 'rgba(244,114,182,0.07)', connectorKey: 'cursor', skillKey: null,      staticModels: ['Composer', 'SDK models'] },

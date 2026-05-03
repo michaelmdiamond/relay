@@ -5,6 +5,7 @@ import { InputBar } from './InputBar'
 import { UsageDashboard } from './UsageDashboard'
 import { ConnectionsDashboard } from './ConnectionsDashboard'
 import { useChatStore } from '../store/chat'
+import { CODEX_MODELS } from '../../../shared/types'
 import type { ChatMessage, ConversationMemory, CursorModelOption, GeminiModel, SendMessageOptions } from '../../../shared/types'
 
 function formatCount(value: number): string {
@@ -173,6 +174,8 @@ const memoryTextStyle: CSSProperties = {
 
 export function ChatPane() {
   const { conversations, activeId, activePane, modelChoice, sending, setModelChoice, setSending, replaceConversation } = useChatStore()
+  const [codexModel, setCodexModelState] = useState<string>(CODEX_MODELS[0])
+  const [codexModels, setCodexModels] = useState<string[]>([...CODEX_MODELS])
   const [geminiModel, setGeminiModelState] = useState<GeminiModel>('gemini-2.5-flash')
   const [ollamaModel, setOllamaModelState] = useState<string | null>(null)
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
@@ -188,11 +191,13 @@ export function ChatPane() {
 
   useEffect(() => {
     async function loadProviderState() {
-      const [gemini, ollama, cursor] = await Promise.all([
+      const [codex, gemini, ollama, cursor] = await Promise.all([
+        window.api.getCodexModel(),
         window.api.getGeminiModel(),
         window.api.getOllamaStatus(),
         window.api.getCursorKeyStatus(),
       ])
+      setCodexModelState(codex)
       setGeminiModelState(gemini)
       const baseUrl = ollama.baseUrl ?? 'http://localhost:11434'
       setOllamaBaseUrl(baseUrl)
@@ -203,6 +208,13 @@ export function ChatPane() {
       ])
       setOllamaModels(ollamaModelResult.models)
       setCursorModelState(selectedCursorModel)
+      const codexModelResult = await window.api.getCodexModels()
+      setCodexModels(codexModelResult.models)
+      if (!codexModelResult.error && codexModelResult.models.length && !codexModelResult.models.includes(codex)) {
+        const nextCodexModel = codexModelResult.models[0]
+        setCodexModelState(nextCodexModel)
+        await window.api.setCodexModel(nextCodexModel)
+      }
       if (cursor.configured) {
         await refreshCursorModels()
       }
@@ -230,6 +242,11 @@ export function ChatPane() {
   async function handleGeminiModelChange(model: GeminiModel) {
     setGeminiModelState(model)
     await window.api.setGeminiModel(model)
+  }
+
+  async function handleCodexModelChange(model: string) {
+    setCodexModelState(model)
+    await window.api.setCodexModel(model)
   }
 
   async function handleOllamaModelChange(model: string) {
@@ -415,6 +432,9 @@ export function ChatPane() {
         <InputBar
           modelChoice={modelChoice}
           onModelChange={setModelChoice}
+          codexModel={codexModel}
+          codexModels={codexModels}
+          onCodexModelChange={handleCodexModelChange}
           geminiModel={geminiModel}
           onGeminiModelChange={handleGeminiModelChange}
           ollamaModel={ollamaModel}
