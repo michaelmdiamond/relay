@@ -1,64 +1,104 @@
 import { randomUUID } from 'crypto'
+import { app } from 'electron'
+import * as fs from 'fs'
+import * as path from 'path'
 import { getValidAccessToken } from './openai-auth'
+import { CODEX_MODELS } from '../shared/types'
 import type { ChatMessage, TokenUsage } from '../shared/types'
 import { RELAY_SYSTEM_PROMPT } from './system-prompt'
+import { writePrivateJson } from './private-json'
 
 const CODEX_BASE = 'https://chatgpt.com/backend-api/codex'
+const CONFIG_PATH = path.join(app.getPath('userData'), 'codex-model-config.json')
 
-// Preferred models in priority order — first one your account supports wins
-const MODEL_PREFERENCE = [
-  'gpt-5.5',
-  'gpt-5.4',
-  'gpt-5.4-mini',
-  'gpt-5.3-codex',
-  'gpt-5.2',
-  'gpt-5.1-codex',
-]
+// Preferred models in priority order — first one your account supports wins.
+const MODEL_PREFERENCE = [...CODEX_MODELS]
+const DEFAULT_MODEL = MODEL_PREFERENCE[0]
 
-let cachedModel: string | null = null
+interface CodexModelConfig {
+  model?: string
+}
+
+function readConfig(): CodexModelConfig | null {
+  try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) } catch { return null }
+}
+
+function writeConfig(cfg: CodexModelConfig): void {
+  writePrivateJson(CONFIG_PATH, cfg)
+}
+
+export function getCodexModel(): string {
+  return readConfig()?.model ?? DEFAULT_MODEL
+}
+
+export function saveCodexModel(model: string): void {
+  const trimmed = model.trim()
+  if (!trimmed) return
+  writeConfig({ model: trimmed })
+  resetModelCache()
+}
+
+let cachedModel: { preferred: string; resolved: string } | null = null
 
 export function resetModelCache(): void {
   cachedModel = null
 }
 
-async function resolveModel(accessToken: string, accountId?: string): Promise<string> {
-  if (cachedModel) return cachedModel
+async function fetchAvailableModels(accessToken: string, accountId?: string): Promise<string[] | null> {
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${accessToken}`,
+    'originator': 'relay',
+  }
+  if (accountId) headers['ChatGPT-Account-Id'] = accountId
+
+  const res = await fetch(`${CODEX_BASE}/models?client_version=1.0.0`, {
+    headers,
+    signal: AbortSignal.timeout(10_000),
+  })
+
+  if (!res.ok) return null
+
+  const json = await res.json() as { models?: Array<{ slug: string; supported_in_api?: boolean; visibility?: string }> }
+  return (json.models ?? [])
+    .filter(m => m.visibility !== 'hidden')
+    .map(m => m.slug)
+    .filter(Boolean)
+}
+
+export async function listCodexModels(): Promise<{ models: string[]; error?: string }> {
+  try {
+    const auth = await getValidAccessToken()
+    const models = await fetchAvailableModels(auth.accessToken, auth.accountId)
+    if (models?.length) return { models }
+    return { models: MODEL_PREFERENCE, error: 'No Codex models returned for this account.' }
+  } catch (err) {
+    return {
+      models: MODEL_PREFERENCE,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
+async function resolveModel(accessToken: string, accountId?: string, preferredModel = getCodexModel()): Promise<string> {
+  if (cachedModel?.preferred === preferredModel) return cachedModel.resolved
 
   try {
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${accessToken}`,
-      'originator': 'relay',
-    }
-    if (accountId) headers['ChatGPT-Account-Id'] = accountId
+    const models = await fetchAvailableModels(accessToken, accountId)
+    const available = new Set(models ?? [])
+    const resolved =
+      available.has(preferredModel)
+        ? preferredModel
+        : MODEL_PREFERENCE.find(m => available.has(m)) ?? models?.[0]
 
-    const res = await fetch(`${CODEX_BASE}/models?client_version=1.0.0`, {
-      headers,
-      signal: AbortSignal.timeout(10_000),
-    })
-
-    if (res.ok) {
-      const json = await res.json() as { models?: Array<{ slug: string; supported_in_api?: boolean; visibility?: string }> }
-      const available = new Set(
-        (json.models ?? [])
-          .filter(m => m.visibility !== 'hidden')
-          .map(m => m.slug)
-      )
-      const match = MODEL_PREFERENCE.find(m => available.has(m))
-      if (match) {
-        cachedModel = match
-        return match
-      }
-      // Fall back to first available model
-      const first = json.models?.[0]?.slug
-      if (first) {
-        cachedModel = first
-        return first
-      }
+    if (resolved) {
+      cachedModel = { preferred: preferredModel, resolved }
+      return resolved
     }
   } catch {
     // ignore, fall through to hard fallback
   }
-  return MODEL_PREFERENCE[0]
+
+  return preferredModel || DEFAULT_MODEL
 }
 
 // Converts our internal message history to the Responses API input format
@@ -78,7 +118,8 @@ export async function streamCodexMessage(
     error: (msg: string) => void
   },
   signal?: AbortSignal,
-  systemContext?: string
+  systemContext?: string,
+  preferredModel?: string
 ): Promise<void> {
   let auth: { accessToken: string; accountId?: string }
 
@@ -89,7 +130,7 @@ export async function streamCodexMessage(
     return
   }
 
-  const model = await resolveModel(auth.accessToken, auth.accountId)
+  const model = await resolveModel(auth.accessToken, auth.accountId, preferredModel)
   const sessionId = randomUUID()
 
   const headers: Record<string, string> = {

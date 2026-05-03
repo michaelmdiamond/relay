@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto'
 import type { ChatMessage, ChatMode, ContextAttachment, ContextPacket, Conversation, ConversationMemory, ModelChoice, RequestDiagnostics, SendMessageOptions, TokenUsage } from '../shared/types'
 import { route } from './router'
 import { isOpenAIConnected } from './openai-auth'
-import { streamCodexMessage } from './openai-codex'
+import { getCodexModel, streamCodexMessage } from './openai-codex'
 import { isGeminiConnected, getGeminiModel } from './gemini-auth'
 import { streamGeminiMessage } from './gemini'
 import { isOllamaConfigured, getOllamaConfig } from './ollama-config'
@@ -713,11 +713,12 @@ export async function sendMessage(
   // Route — pass connection state for all free providers
   const { connected: openAIConnected } = isOpenAIConnected()
   const { configured: geminiConnected } = isGeminiConnected()
+  const codexModel = getCodexModel()
   const geminiModel = getGeminiModel()
   const ollamaConfigured = isOllamaConfigured()
   const ollamaModel = getOllamaConfig()?.model ?? ''
   const { configured: cursorConfigured } = isCursorConnected()
-  const routing = route(conv.messages, modelChoice, openAIConnected, geminiConnected, geminiModel, ollamaConfigured, ollamaModel, cursorConfigured, getCursorModel())
+  const routing = route(conv.messages, modelChoice, openAIConnected, geminiConnected, codexModel, geminiModel, ollamaConfigured, ollamaModel, cursorConfigured, getCursorModel())
 
   // If routing to Anthropic but no key configured, bail early with a clear message
   if (routing.provider === 'anthropic' && !isApiKeyConfigured()) {
@@ -899,7 +900,7 @@ export async function sendMessage(
         }))
         emit.error(conversationId, assistantId, msg)
       },
-    }, signal, systemContext)
+    }, signal, systemContext, routing.model)
     if (signal.aborted) {
       if (accumulated) finalizePartial(accumulated)
       else cancelPlaceholder()

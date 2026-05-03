@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CODEX_MODELS } from '../../../shared/types'
 import type { CursorModelOption, GeminiModel, ModelChoice } from '../../../shared/types'
 
 type TopLevelChoice = 'auto' | 'claude' | 'codex' | 'gemini' | 'ollama' | 'cursor'
@@ -18,6 +19,15 @@ const CLAUDE_MODELS: { value: Extract<ModelChoice, 'haiku' | 'sonnet' | 'opus'>;
   { value: 'opus',   label: 'Opus',   sub: 'most capable' },
 ]
 
+const CODEX_MODEL_META: Record<string, { label: string; sub: string }> = {
+  'gpt-5.5': { label: 'GPT-5.5', sub: 'most capable' },
+  'gpt-5.4': { label: 'GPT-5.4', sub: 'balanced' },
+  'gpt-5.4-mini': { label: 'GPT-5.4 Mini', sub: 'fast' },
+  'gpt-5.3-codex': { label: '5.3 Codex', sub: 'code' },
+  'gpt-5.2': { label: 'GPT-5.2', sub: 'legacy' },
+  'gpt-5.1-codex': { label: '5.1 Codex', sub: 'legacy' },
+}
+
 const GEMINI_MODELS: { value: GeminiModel; label: string; sub: string }[] = [
   { value: 'gemini-2.5-flash',      label: 'Flash',      sub: 'fast · free' },
   { value: 'gemini-2.5-flash-lite', label: 'Flash-Lite', sub: 'fastest · free' },
@@ -27,6 +37,9 @@ const GEMINI_MODELS: { value: GeminiModel; label: string; sub: string }[] = [
 interface Props {
   value: ModelChoice
   onChange: (v: ModelChoice) => void
+  codexModel?: string
+  codexModels?: string[]
+  onCodexModelChange?: (v: string) => void
   geminiModel?: GeminiModel
   onGeminiModelChange?: (v: GeminiModel) => void
   ollamaModel?: string | null
@@ -44,6 +57,9 @@ interface Props {
 export function ModelSelector({
   value,
   onChange,
+  codexModel,
+  codexModels,
+  onCodexModelChange,
   geminiModel,
   onGeminiModelChange,
   ollamaModel,
@@ -69,6 +85,10 @@ export function ModelSelector({
   ]
   if (cursorModel && !cursorModelOptions.some(model => model.id === cursorModel)) {
     cursorModelOptions.push({ id: cursorModel, displayName: cursorModel })
+  }
+  const codexModelOptions = [...(codexModels?.length ? codexModels : CODEX_MODELS)]
+  if (codexModel && !codexModelOptions.includes(codexModel)) {
+    codexModelOptions.push(codexModel)
   }
 
   function handleTopLevelChange(next: TopLevelChoice) {
@@ -133,6 +153,35 @@ export function ModelSelector({
               <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>{opt.sub}</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {topLevelValue === 'codex' && showSubmenu && onCodexModelChange && (
+        <div style={{ display: 'flex', gap: 4, paddingLeft: 2, flexWrap: 'wrap' }}>
+          {codexModelOptions.map(model => {
+            const meta = CODEX_MODEL_META[model] ?? { label: model, sub: 'available' }
+            return (
+              <button
+                key={model}
+                disabled={disabled}
+                onClick={() => onCodexModelChange(model)}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: 5,
+                  border: `1px solid ${codexModel === model ? 'rgba(56,189,248,0.4)' : 'transparent'}`,
+                  cursor: disabled ? 'default' : 'pointer',
+                  fontSize: 11,
+                  fontWeight: codexModel === model ? 600 : 400,
+                  background: codexModel === model ? 'rgba(56,189,248,0.12)' : 'transparent',
+                  color: codexModel === model ? '#7dd3fc' : 'rgba(255,255,255,0.35)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {meta.label}
+                <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>{meta.sub}</span>
+              </button>
+            )
+          })}
         </div>
       )}
 
