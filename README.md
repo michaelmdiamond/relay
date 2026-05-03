@@ -20,10 +20,10 @@ Relay supports five provider families out of the box:
 | Provider | Models | Auth |
 |---|---|---|
 | **Anthropic** | Haiku, Sonnet, Opus | API key |
-| **OpenAI Codex** | gpt-5.x series | OAuth (your ChatGPT account) |
-| **Google Gemini** | 2.5 Pro, Flash, Flash-Lite | API key |
+| **OpenAI Codex** | gpt-5.x series | OAuth | API key
+| **Google Gemini** | 2.5 Pro, Flash, Flash-Lite | Oauth | API key |
 | **Ollama** | Any local model | Auto-start, no key needed |
-| **Cursor SDK** | Composer + others | API key |
+| **Cursor SDK** | Composer + others | Oauth | API key |
 
 ### Smart auto-routing
 In `auto` mode, Relay picks the right model for each message:
