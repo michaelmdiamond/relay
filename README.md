@@ -38,7 +38,7 @@ You can always override and pin a specific provider.
 Each conversation accumulates a lightweight memory: active goal, pinned facts, key decisions, files touched. At 14+ messages Relay auto-summarizes the history so you keep coherent multi-turn context without burning tokens on stale messages.
 
 ### In-app terminals
-Launch `claude` or `codex` CLI sessions in a PTY tab inside the app. Terminal sessions sit alongside chat so you can reference the same conversation context without context-switching windows.
+Launch `codex`, `claude`, `gemini`, `cursor-agent`, or a local shell in a PTY tab inside the app. Terminal sessions sit alongside chat so you can reference the same conversation context without context-switching windows.
 
 ### Token usage dashboard
 Tracks input/output/cached tokens per model across all providers in one dashboard. Useful for understanding where your quota actually goes.
@@ -68,8 +68,19 @@ Six prompt modes tune how the model approaches a message: `quick`, `deep`, `code
 git clone https://github.com/michaelmdiamond/relay.git
 cd relay
 npm install
-npm run dev       # starts main + renderer in watch mode
-npm run electron  # launches the Electron app
+npm start
+```
+
+`npm start` builds the main process and renderer, then launches the Electron app.
+
+For development, use two terminals:
+
+```bash
+# Terminal 1: compile the Electron main/preload code and run Vite
+npm run dev
+
+# Terminal 2: launch Electron against the Vite dev server
+NODE_ENV=development npm run electron
 ```
 
 ### Connecting providers
@@ -112,9 +123,11 @@ Conversations persist locally at `~/.config/Relay/conversations.json`.
 
 | Command | Description |
 |---|---|
-| `npm run dev` | Watch mode for main + renderer |
-| `npm run build` | Production build |
-| `npm run electron` | Launch built app |
+| `npm start` | Build and launch the Electron app |
+| `npm run dev` | Watch the Electron main/preload code and run the Vite renderer dev server |
+| `NODE_ENV=development npm run electron` | Launch Electron against the Vite dev server |
+| `npm run build` | Build main/preload and renderer into `dist/` |
+| `npm run electron` | Launch Electron from the built `dist/renderer` output |
 
 ---
 
