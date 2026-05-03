@@ -6,13 +6,14 @@ import { randomUUID } from 'crypto'
 import { getGeminiApiKey } from './gemini-auth'
 import { getValidAccessToken } from './openai-auth'
 import { writePrivateJson } from './private-json'
-import type {
-  AgentProfile,
-  WorkflowArtifact,
-  WorkflowDefinition,
-  WorkflowRun,
-  WorkflowStepRun,
-  WorkflowVerdict,
+import {
+  CODEX_MODELS,
+  type AgentProfile,
+  type WorkflowArtifact,
+  type WorkflowDefinition,
+  type WorkflowRun,
+  type WorkflowStepRun,
+  type WorkflowVerdict,
 } from '../shared/types'
 
 const STORE_PATH = path.join(app.getPath('userData'), 'workflow-store.json')
@@ -33,7 +34,7 @@ function defaultAgentProfiles(): AgentProfile[] {
       id: 'codex-implementer',
       name: 'Codex Implementer',
       provider: 'openai',
-      model: 'gpt-5.3-codex',
+      model: CODEX_MODELS[0],
       role: 'implementer',
       enabled: true,
       systemPrompt: [

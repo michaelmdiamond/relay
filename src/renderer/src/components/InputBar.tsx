@@ -10,6 +10,9 @@ const PROVIDER_COLOR: Record<'claude' | 'codex', string> = {
 interface Props {
   modelChoice: ModelChoice
   onModelChange: (v: ModelChoice) => void
+  codexModel?: string
+  codexModels?: string[]
+  onCodexModelChange?: (v: string) => void
   geminiModel?: GeminiModel
   onGeminiModelChange?: (v: GeminiModel) => void
   ollamaModel?: string | null
@@ -30,6 +33,9 @@ interface Props {
 export function InputBar({
   modelChoice,
   onModelChange,
+  codexModel,
+  codexModels,
+  onCodexModelChange,
   geminiModel,
   onGeminiModelChange,
   ollamaModel,
@@ -338,6 +344,9 @@ export function InputBar({
           <ModelSelector
             value={modelChoice}
             onChange={onModelChange}
+            codexModel={codexModel}
+            codexModels={codexModels}
+            onCodexModelChange={onCodexModelChange}
             geminiModel={geminiModel}
             onGeminiModelChange={onGeminiModelChange}
             ollamaModel={ollamaModel}

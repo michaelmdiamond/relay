@@ -15,7 +15,7 @@ import {
   estimateTokens,
 } from './chat'
 import { isOpenAIConnected, startLogin, clearCredentials } from './openai-auth'
-import { resetModelCache } from './openai-codex'
+import { getCodexModel, listCodexModels, resetModelCache, saveCodexModel } from './openai-codex'
 import { isGeminiConnected, saveGeminiKey, disconnectGemini as clearGeminiCredentials, getGeminiModel, saveGeminiModel } from './gemini-auth'
 import { isOllamaConfigured, getOllamaConfig, saveOllamaConfig, disconnectOllama } from './ollama-config'
 import { ensureOllamaRunning, stopOllamaProcess, checkOllamaReachable, startAndGetModels } from './ollama-process'
@@ -93,6 +93,9 @@ ipcMain.handle('delete-conversation', (_e, id: string) => deleteConversation(id)
 ipcMain.handle('get-openai-auth-status', () => isOpenAIConnected())
 ipcMain.handle('start-openai-login', () => startLogin())
 ipcMain.handle('disconnect-openai', () => { clearCredentials(); resetModelCache() })
+ipcMain.handle('get-codex-model', () => getCodexModel())
+ipcMain.handle('set-codex-model', (_e, model: string) => saveCodexModel(model))
+ipcMain.handle('get-codex-models', () => listCodexModels())
 
 ipcMain.handle('get-gemini-key-status', () => isGeminiConnected())
 ipcMain.handle('set-gemini-key', (_e, key: string) => saveGeminiKey(key))
