@@ -720,6 +720,9 @@ body {
   position: absolute;
   inset: 8px;
   overflow: hidden;
+  flex-direction: column;
+  gap: 8px;
+  background: #050507;
 }
 
 .terminal-session-wrapper--opaque {
@@ -728,12 +731,134 @@ body {
 
 .terminal-session-container {
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #050507;
 }
 
-.terminal-session-container .xterm { height: 100%; }
-.terminal-session-container .xterm-screen { height: 100%; }
-.terminal-session-container .xterm-viewport { height: 100% !important; overflow-y: auto !important; }
+.terminal-session-container .xterm {
+  height: 100%;
+  background: #050507;
+}
+
+.terminal-session-container .xterm-screen {
+  height: 100%;
+  background: #050507;
+}
+
+.terminal-session-container .xterm-viewport {
+  height: 100% !important;
+  overflow-y: auto !important;
+  background: #050507 !important;
+}
+
+.terminal-composer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  background: rgba(8, 10, 18, 0.82);
+  backdrop-filter: var(--blur-card);
+  -webkit-backdrop-filter: var(--blur-card);
+  box-shadow: var(--specular-card), 0 10px 30px rgba(0,0,0,0.22);
+}
+
+.terminal-composer__mode {
+  display: inline-flex;
+  align-self: start;
+  padding: 2px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+}
+
+.terminal-composer__mode-btn,
+.terminal-composer__action {
+  border: none;
+  color: rgba(255,255,255,0.62);
+  background: transparent;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.terminal-composer__mode-btn {
+  padding: 6px 9px;
+}
+
+.terminal-composer__mode-btn.active {
+  color: var(--text);
+  background: rgba(255,255,255,0.10);
+  box-shadow: var(--specular-card);
+}
+
+.terminal-composer__input {
+  width: 100%;
+  min-height: 46px;
+  max-height: 130px;
+  resize: vertical;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: var(--text);
+  background: rgba(0,0,0,0.28);
+  font: 13px/1.45 "Cascadia Code", "Fira Code", "Menlo", monospace;
+  outline: none;
+}
+
+.terminal-composer__input:focus {
+  border-color: rgba(90,180,255,0.35);
+  box-shadow: 0 0 0 3px rgba(90,180,255,0.10);
+}
+
+.terminal-composer__input::placeholder {
+  color: rgba(255,255,255,0.28);
+}
+
+.terminal-composer__actions {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.terminal-composer__action {
+  min-width: 48px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.05);
+}
+
+.terminal-composer__action:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255,255,255,0.09);
+}
+
+.terminal-composer__action:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.terminal-composer__action--primary {
+  color: var(--text);
+  border-color: rgba(90,180,255,0.35);
+  background: rgba(90,180,255,0.20);
+}
+
+.terminal-composer__direct {
+  grid-column: 2 / 4;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 10px;
+  color: rgba(255,255,255,0.46);
+  font-size: 12px;
+  line-height: 1.4;
+}
 
 .terminal-unmanaged {
   display: flex;
@@ -751,7 +876,7 @@ body {
 }
 
 .terminals-empty {
-  color: var(--text-dim);
+  color: var(--text);
   font-size: 12px;
   text-align: center;
   padding: 20px 10px;
@@ -1428,10 +1553,21 @@ body {
   font-size: 11px;
 }
 
+.relay-inline-hint {
+  color: rgba(255,255,255,0.36);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .relay-model-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.relay-model-list--stacked {
+  align-items: stretch;
+  flex-direction: column;
 }
 
 .relay-model-chip {
@@ -1442,6 +1578,18 @@ body {
   padding: 6px 9px;
   font-size: 11px;
   cursor: pointer;
+}
+
+.relay-model-chip--wide {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 9px;
+  text-align: left;
+}
+
+.relay-model-chip--wide span:last-child {
+  color: rgba(255,255,255,0.36);
 }
 
 .relay-plugin-grid {

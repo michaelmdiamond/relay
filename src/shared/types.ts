@@ -199,7 +199,19 @@ export interface Conversation {
   memory?: ConversationMemory
 }
 
-export type TerminalLauncherId = 'codex' | 'claude' | 'gemini' | 'cursor' | 'shell'
+export type TerminalLauncherId = 'codex' | 'claude' | 'gemini' | 'cursor' | 'local' | 'shell'
+
+export interface TerminalSessionSnapshot {
+  id: string
+  launcherId: TerminalLauncherId
+  name: string
+  cwd?: string
+}
+
+export interface TerminalBufferSnapshot {
+  output: string
+  sequence: number
+}
 
 export type WorkflowAgentProvider = 'anthropic' | 'openai' | 'google'
 export type WorkflowAgentRole = 'implementer' | 'reviewer'
@@ -269,12 +281,14 @@ export interface WorkflowRun {
 }
 
 export interface TerminalApi {
-  createTerminal: (id: string, launcherId: TerminalLauncherId, cwd?: string) => Promise<void>
-  sendTerminalInput: (id: string, data: string) => Promise<void>
+  listTerminalSessions: () => Promise<TerminalSessionSnapshot[]>
+  getTerminalBuffer: (id: string) => Promise<TerminalBufferSnapshot>
+  createTerminal: (id: string, launcherId: TerminalLauncherId, name: string, cwd?: string) => Promise<TerminalSessionSnapshot>
+  sendTerminalInput: (id: string, data: string) => Promise<boolean>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<void>
   selectDirectory: () => Promise<string | null>
-  onTerminalData: (cb: (id: string, data: string) => void) => () => void
+  onTerminalData: (cb: (id: string, data: string, sequence: number) => void) => () => void
   onTerminalExit: (cb: (id: string, code: number) => void) => () => void
 }
 
@@ -311,6 +325,7 @@ export interface ChatApi {
   disconnectOllama: () => Promise<void>
   checkOllamaReachable: () => Promise<boolean>
   getOllamaModels: (baseUrl?: string) => Promise<{ models: string[]; error?: string }>
+  pullOllamaModel: (model: string, baseUrl?: string) => Promise<{ ok: boolean; error?: string }>
 
   getCursorKeyStatus: () => Promise<{ configured: boolean; userEmail?: string; apiKeyName?: string }>
   setCursorKey: (key: string) => Promise<void>

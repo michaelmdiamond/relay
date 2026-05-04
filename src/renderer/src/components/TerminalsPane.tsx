@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import type { TerminalLauncherId } from '../../../shared/types'
+import type { TerminalLauncherId, TerminalSessionSnapshot } from '../../../shared/types'
 
 interface Launcher {
   id: TerminalLauncherId
@@ -12,13 +13,6 @@ interface Launcher {
   detail: string
   cta: string
   sessionLabel: string
-}
-
-interface TerminalSession {
-  id: string
-  launcherId: TerminalLauncherId
-  name: string
-  cwd?: string
 }
 
 const launchers: Launcher[] = [
@@ -59,6 +53,15 @@ const launchers: Launcher[] = [
     sessionLabel: 'Cursor Session',
   },
   {
+    id: 'local',
+    name: 'Local Agent',
+    status: 'ollama',
+    headline: 'Launch a local agent session',
+    detail: 'Use this when you want an Ollama-backed agent running in the selected project folder with the configured Local model.',
+    cta: 'New Local session',
+    sessionLabel: 'Local Session',
+  },
+  {
     id: 'shell',
     name: 'Local Shell',
     status: 'manual',
@@ -70,15 +73,94 @@ const launchers: Launcher[] = [
 ]
 
 interface TerminalViewProps {
-  session: TerminalSession
+  session: TerminalSessionSnapshot
   active: boolean
 }
 
 function TerminalView({ session, active }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<HTMLTextAreaElement>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
+  const editorModeRef = useRef(false)
+  const [editorMode, setEditorMode] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [history, setHistory] = useState<string[]>([])
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null)
+
+  useEffect(() => {
+    editorModeRef.current = editorMode
+  }, [editorMode])
+
+  function sendTerminalData(data: string) {
+    return window.terminalApi.sendTerminalInput(session.id, data)
+  }
+
+  function handlePasteDraft({ run }: { run: boolean }) {
+    const message = draft.replace(/\r\n?/g, '\n').trimEnd()
+    if (!message) return
+
+    const term = termRef.current
+    if (!term) return
+    editorModeRef.current = false
+    setEditorMode(false)
+
+    requestAnimationFrame(() => {
+      term?.focus()
+      term?.paste(message)
+      if (run) setTimeout(() => window.terminalApi.sendTerminalInput(session.id, '\r'), 0)
+    })
+
+    setHistory((current) => [message, ...current.filter((item) => item !== message)].slice(0, 50))
+    setHistoryIndex(null)
+    setDraft('')
+  }
+
+  function handleEditorKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      handlePasteDraft({ run: true })
+      return
+    }
+
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault()
+      handlePasteDraft({ run: true })
+      return
+    }
+
+    if (event.key === 'Escape' && draft.length === 0) {
+      event.preventDefault()
+      setEditorMode(false)
+      requestAnimationFrame(() => termRef.current?.focus())
+      return
+    }
+
+    if (event.key === 'ArrowUp' && history.length > 0) {
+      const target = event.currentTarget
+      const cursorAtStart = target.selectionStart === 0 && target.selectionEnd === 0
+      if (draft.length === 0 || cursorAtStart) {
+        event.preventDefault()
+        const nextIndex = historyIndex === null ? 0 : Math.min(historyIndex + 1, history.length - 1)
+        setHistoryIndex(nextIndex)
+        setDraft(history[nextIndex])
+      }
+      return
+    }
+
+    if (event.key === 'ArrowDown' && historyIndex !== null) {
+      event.preventDefault()
+      const nextIndex = historyIndex - 1
+      if (nextIndex < 0) {
+        setHistoryIndex(null)
+        setDraft('')
+      } else {
+        setHistoryIndex(nextIndex)
+        setDraft(history[nextIndex])
+      }
+    }
+  }
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -88,9 +170,8 @@ function TerminalView({ session, active }: TerminalViewProps) {
       fontSize: 13,
       lineHeight: 1.4,
       cursorBlink: true,
-      allowTransparency: true,
       theme: {
-        background: session.launcherId === 'gemini' ? '#070711' : '#00000000',
+        background: session.launcherId === 'gemini' ? '#070711' : '#050507',
         foreground: '#e2e8f0',
         cursor: '#e2e8f0',
         selectionBackground: '#4a5568',
@@ -133,12 +214,36 @@ function TerminalView({ session, active }: TerminalViewProps) {
 
     setTimeout(() => {
       fitTerminal()
-      term.focus()
+      if (editorModeRef.current) editorRef.current?.focus()
+      else term.focus()
     }, 50)
 
-    window.terminalApi.createTerminal(session.id, session.launcherId, session.cwd)
+    let disposed = false
+    let bufferReplayed = false
+    let bufferSequence = 0
+    const pendingData: Array<{ data: string; sequence: number }> = []
+    window.terminalApi.createTerminal(session.id, session.launcherId, session.name, session.cwd)
+      .then(() => window.terminalApi.getTerminalBuffer(session.id))
+      .then((buffer) => {
+        if (disposed) return
+        bufferSequence = buffer.sequence
+        if (buffer.output) term.write(buffer.output)
+        bufferReplayed = true
+        pendingData.forEach((item) => {
+          if (item.sequence > bufferSequence) {
+            term.write(item.data)
+            bufferSequence = item.sequence
+          }
+        })
+        pendingData.length = 0
+      })
+      .catch(() => {
+        if (!disposed) term.write('\r\n\x1b[31m[Unable to attach terminal session]\x1b[0m\r\n')
+      })
 
-    const onDataDispose = term.onData((data) => window.terminalApi.sendTerminalInput(session.id, data))
+    const onDataDispose = term.onData((data) => {
+      if (!editorModeRef.current) window.terminalApi.sendTerminalInput(session.id, data)
+    })
     const onResizeDispose = term.onResize(({ cols, rows }) => {
       const lastSize = lastSizeRef.current
       if (lastSize?.cols === cols && lastSize.rows === rows) return
@@ -146,14 +251,19 @@ function TerminalView({ session, active }: TerminalViewProps) {
       window.terminalApi.resizeTerminal(session.id, cols, rows)
     })
 
-    const unsubData = window.terminalApi.onTerminalData((id, data) => {
-      if (id === session.id) term.write(data)
+    const unsubData = window.terminalApi.onTerminalData((id, data, sequence) => {
+      if (id !== session.id) return
+      if (!bufferReplayed) {
+        pendingData.push({ data, sequence })
+        return
+      }
+      if (sequence > bufferSequence) {
+        term.write(data)
+        bufferSequence = sequence
+      }
     })
 
-    const unsubExit = window.terminalApi.onTerminalExit((id, code) => {
-      if (id === session.id)
-        term.write(`\r\n\x1b[90m[Process exited with code ${code}]\x1b[0m\r\n`)
-    })
+    const unsubExit = window.terminalApi.onTerminalExit(() => {})
 
     let resizeFrame: number | null = null
     const ro = new ResizeObserver(() => {
@@ -166,6 +276,7 @@ function TerminalView({ session, active }: TerminalViewProps) {
     ro.observe(containerRef.current)
 
     return () => {
+      disposed = true
       if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
       onDataDispose.dispose()
       onResizeDispose.dispose()
@@ -173,9 +284,8 @@ function TerminalView({ session, active }: TerminalViewProps) {
       unsubExit()
       ro.disconnect()
       term.dispose()
-      window.terminalApi.killTerminal(session.id)
     }
-  }, [session.id, session.launcherId])
+  }, [session.id, session.launcherId, session.name, session.cwd])
 
   useEffect(() => {
     if (active) {
@@ -190,25 +300,101 @@ function TerminalView({ session, active }: TerminalViewProps) {
             window.terminalApi.resizeTerminal(session.id, cols, rows)
           }
         }
-        termRef.current?.focus()
+        if (editorMode) editorRef.current?.focus()
+        else termRef.current?.focus()
       })
     }
-  }, [active])
+  }, [active, editorMode])
 
   return (
     <div
       className={`terminal-session-wrapper${session.launcherId === 'gemini' ? ' terminal-session-wrapper--opaque' : ''}`}
-      style={{ display: active ? 'block' : 'none' }}
-      onClick={() => termRef.current?.focus()}
+      style={{ display: active ? 'flex' : 'none' }}
+      onClick={() => {
+        if (editorMode) editorRef.current?.focus()
+        else termRef.current?.focus()
+      }}
     >
       <div ref={containerRef} className="terminal-session-container" />
+      <div className="terminal-composer" onClick={(event) => event.stopPropagation()}>
+        <div className="terminal-composer__mode" role="group" aria-label="Terminal input mode">
+          <button
+            type="button"
+            className={`terminal-composer__mode-btn${editorMode ? ' active' : ''}`}
+            onClick={() => {
+              setEditorMode(true)
+              requestAnimationFrame(() => editorRef.current?.focus())
+            }}
+          >
+            Editor
+          </button>
+          <button
+            type="button"
+            className={`terminal-composer__mode-btn${!editorMode ? ' active' : ''}`}
+            onClick={() => {
+              setEditorMode(false)
+              requestAnimationFrame(() => termRef.current?.focus())
+            }}
+          >
+            Direct
+          </button>
+        </div>
+        {editorMode ? (
+          <>
+            <textarea
+              ref={editorRef}
+              className="terminal-composer__input"
+              value={draft}
+              rows={2}
+              spellCheck={false}
+              placeholder="Type a command or prompt. Enter runs, Shift+Enter adds a line."
+              onChange={(event) => {
+                setDraft(event.target.value)
+                setHistoryIndex(null)
+              }}
+              onKeyDown={handleEditorKeyDown}
+            />
+            <div className="terminal-composer__actions">
+              <button type="button" className="terminal-composer__action" onClick={() => sendTerminalData('\x03')}>
+                Ctrl-C
+              </button>
+              <button type="button" className="terminal-composer__action" onClick={() => sendTerminalData('\t')}>
+                Tab
+              </button>
+              <button type="button" className="terminal-composer__action" onClick={() => sendTerminalData('\x1b')}>
+                Esc
+              </button>
+              <button
+                type="button"
+                className="terminal-composer__action terminal-composer__action--primary"
+                onClick={() => handlePasteDraft({ run: false })}
+                disabled={draft.trimEnd().length === 0}
+              >
+                Paste
+              </button>
+              <button
+                type="button"
+                className="terminal-composer__action terminal-composer__action--primary"
+                onClick={() => handlePasteDraft({ run: true })}
+                disabled={draft.trimEnd().length === 0}
+              >
+                Run
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="terminal-composer__direct">
+            Raw terminal input is active. Press Esc in the terminal as usual, or switch back to Editor for editable command entry.
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
 export function TerminalsPane() {
   const [selectedId, setSelectedId] = useState<TerminalLauncherId>('codex')
-  const [sessions, setSessions] = useState<TerminalSession[]>([])
+  const [sessions, setSessions] = useState<TerminalSessionSnapshot[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [cwd, setCwd] = useState<string | null>(null)
 
@@ -217,19 +403,34 @@ export function TerminalsPane() {
     [selectedId],
   )
 
+  useEffect(() => {
+    let canceled = false
+    window.terminalApi.listTerminalSessions().then((existingSessions) => {
+      if (canceled) return
+      setSessions(existingSessions)
+      setActiveSessionId((current) => {
+        if (current && existingSessions.some((session) => session.id === current)) return current
+        return existingSessions[0]?.id ?? null
+      })
+    })
+    return () => {
+      canceled = true
+    }
+  }, [])
+
   async function handlePickDirectory() {
     const dir = await window.terminalApi.selectDirectory()
     if (dir) setCwd(dir)
   }
 
-  function handleLaunchSession() {
+  async function handleLaunchSession() {
     const nextIndex = sessions.filter((s) => s.launcherId === selectedLauncher.id).length + 1
-    const session: TerminalSession = {
-      id: `${selectedLauncher.id}-${crypto.randomUUID()}`,
-      launcherId: selectedLauncher.id,
-      name: `${selectedLauncher.sessionLabel} ${nextIndex}`,
-      cwd: cwd ?? undefined,
-    }
+    const session = await window.terminalApi.createTerminal(
+      `${selectedLauncher.id}-${crypto.randomUUID()}`,
+      selectedLauncher.id,
+      `${selectedLauncher.sessionLabel} ${nextIndex}`,
+      cwd ?? undefined,
+    )
     setSessions((current) => [session, ...current])
     setActiveSessionId(session.id)
   }
@@ -251,11 +452,6 @@ export function TerminalsPane() {
       <aside className="terminals-sidebar">
         <div className="terminals-sidebar__header">
           <div className="terminals-sidebar__title">Live Sessions</div>
-          <div className="terminals-sidebar__subtitle">
-            {sessions.length === 0
-              ? 'No terminals launched yet'
-              : `${sessions.length} active session${sessions.length === 1 ? '' : 's'}`}
-          </div>
         </div>
 
         {sessions.map((session) => (
@@ -304,7 +500,6 @@ export function TerminalsPane() {
 
         <div className="terminals-sidebar__header">
           <div className="terminals-sidebar__title">Launchers</div>
-          <div className="terminals-sidebar__subtitle">Choose how new sessions should start</div>
         </div>
 
         {launchers.map((launcher) => (

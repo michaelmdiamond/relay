@@ -38,7 +38,7 @@ You can always override and pin a specific provider.
 Each conversation accumulates a lightweight memory: active goal, pinned facts, key decisions, files touched. At 14+ messages Relay auto-summarizes the history so you keep coherent multi-turn context without burning tokens on stale messages.
 
 ### In-app terminals
-Launch `codex`, `claude`, `gemini`, `cursor-agent`, or a local shell in a PTY tab inside the app. Terminal sessions sit alongside chat so you can reference the same conversation context without context-switching windows.
+Launch `codex`, `claude`, `gemini`, `cursor-agent`, an Ollama-backed local agent, or a local shell in a PTY tab inside the app. Terminal sessions sit alongside chat so you can reference the same conversation context without context-switching windows.
 
 ### Token usage dashboard
 Tracks input/output/cached tokens per model across all providers in one dashboard. Useful for understanding where your quota actually goes.

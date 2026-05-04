@@ -18,10 +18,10 @@ import { isOpenAIConnected, startLogin, clearCredentials } from './openai-auth'
 import { getCodexModel, listCodexModels, resetModelCache, saveCodexModel } from './openai-codex'
 import { isGeminiConnected, saveGeminiKey, disconnectGemini as clearGeminiCredentials, getGeminiModel, saveGeminiModel } from './gemini-auth'
 import { isOllamaConfigured, getOllamaConfig, saveOllamaConfig, disconnectOllama } from './ollama-config'
-import { ensureOllamaRunning, stopOllamaProcess, checkOllamaReachable, startAndGetModels } from './ollama-process'
+import { ensureOllamaRunning, stopOllamaProcess, checkOllamaReachable, startAndGetModels, pullOllamaModel } from './ollama-process'
 import { disconnectCursor, getCursorModel, isCursorConnected, saveCursorKey, saveCursorModel } from './cursor-auth'
 import { listCursorModels, validateCursorKey } from './cursor-agent'
-import type { GeminiModel, TerminalLauncherId } from '../shared/types'
+import type { GeminiModel, TerminalLauncherId, TerminalSessionSnapshot } from '../shared/types'
 import { getUsageLimits, saveUsageLimits } from './usage-limits'
 import { getConnectorInventory } from './connectors'
 import { getSkills } from './skills'
@@ -117,6 +117,7 @@ ipcMain.handle('disconnect-ollama', () => {
 })
 ipcMain.handle('check-ollama-reachable', () => checkOllamaReachable())
 ipcMain.handle('get-ollama-models', (_e, baseUrl?: string) => startAndGetModels(baseUrl))
+ipcMain.handle('pull-ollama-model', (_e, model: string, baseUrl?: string) => pullOllamaModel(model, baseUrl))
 ipcMain.handle('get-cursor-key-status', () => isCursorConnected())
 ipcMain.handle('set-cursor-key', async (_e, key: string) => {
   saveCursorKey(key)
@@ -186,7 +187,34 @@ function findCliTool(name: string): string {
   return name // bare fallback — shell will surface "not found" clearly
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+interface TerminalSessionState extends TerminalSessionSnapshot {
+  output: string
+  outputSequence: number
+}
+
+const TERMINAL_BUFFER_LIMIT = 200_000
 const ptyProcesses = new Map<string, pty.IPty>()
+const terminalSessions = new Map<string, TerminalSessionState>()
+
+function terminalSessionSnapshot(session: TerminalSessionState): TerminalSessionSnapshot {
+  const { output: _output, outputSequence: _outputSequence, ...snapshot } = session
+  return snapshot
+}
+
+function appendTerminalOutput(id: string, data: string) {
+  const session = terminalSessions.get(id)
+  if (!session) return 0
+  session.outputSequence += 1
+  session.output = `${session.output}${data}`
+  if (session.output.length > TERMINAL_BUFFER_LIMIT) {
+    session.output = session.output.slice(session.output.length - TERMINAL_BUFFER_LIMIT)
+  }
+  return session.outputSequence
+}
 
 ipcMain.handle('select-directory', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -196,20 +224,38 @@ ipcMain.handle('select-directory', async () => {
   return canceled ? null : filePaths[0]
 })
 
-ipcMain.handle('terminal-create', (_e, id: string, launcherId: TerminalLauncherId, cwd?: string) => {
+ipcMain.handle('terminal-list', () => Array.from(terminalSessions.values()).map(terminalSessionSnapshot))
+
+ipcMain.handle('terminal-buffer', (_e, id: string) => {
+  const session = terminalSessions.get(id)
+  return { output: session?.output ?? '', sequence: session?.outputSequence ?? 0 }
+})
+
+ipcMain.handle('terminal-create', (_e, id: string, launcherId: TerminalLauncherId, name: string, cwd?: string) => {
+  const existing = terminalSessions.get(id)
+  if (existing) return terminalSessionSnapshot(existing)
+
   const shell = process.env.SHELL ?? '/bin/zsh'
   const codexBin = findCliTool('codex')
   const claudeBin = findCliTool('claude')
   const geminiBin = findCliTool('gemini')
   const cursorAgentBin = findCliTool('cursor-agent')
+  const ollamaBin = findCliTool('ollama')
+  const ollamaConfig = getOllamaConfig()
+  const localAgentCommand = ollamaConfig?.model
+    ? `exec ${shellQuote(ollamaBin)} run ${shellQuote(ollamaConfig.model)}`
+    : `printf '%s\\n' 'No Local/Ollama model is configured yet. Configure Local in Relay settings, or run: ollama run <model>'; exec ${shellQuote(shell)} -l`
   const launcherMap: Record<TerminalLauncherId, { file: string; args: string[] }> = {
     codex: { file: shell, args: ['-l', '-c', `exec "${codexBin}"`] },
     claude: { file: shell, args: ['-l', '-c', `exec "${claudeBin}"`] },
     gemini: { file: shell, args: ['-l', '-c', `exec "${geminiBin}"`] },
     cursor: { file: shell, args: ['-l', '-c', `exec "${cursorAgentBin}"`] },
+    local: { file: shell, args: ['-l', '-c', localAgentCommand] },
     shell: { file: shell, args: ['-l'] },
   }
   const { file, args } = launcherMap[launcherId]
+  const session: TerminalSessionState = { id, launcherId, name, cwd, output: '', outputSequence: 0 }
+  terminalSessions.set(id, session)
   const proc = pty.spawn(file, args, {
     name: 'xterm-256color',
     cols: 80,
@@ -218,15 +264,30 @@ ipcMain.handle('terminal-create', (_e, id: string, launcherId: TerminalLauncherI
     env: process.env as Record<string, string>,
   })
   ptyProcesses.set(id, proc)
-  proc.onData((data) => win?.webContents.send('terminal-data', id, data))
+  proc.onData((data) => {
+    const sequence = appendTerminalOutput(id, data)
+    win?.webContents.send('terminal-data', id, data, sequence)
+  })
   proc.onExit(({ exitCode }) => {
     ptyProcesses.delete(id)
+    const exitMessage = `\r\n\x1b[90m[Process exited with code ${exitCode}]\x1b[0m\r\n`
+    const sequence = appendTerminalOutput(id, exitMessage)
+    win?.webContents.send('terminal-data', id, exitMessage, sequence)
     win?.webContents.send('terminal-exit', id, exitCode)
   })
+  return terminalSessionSnapshot(session)
 })
 
 ipcMain.handle('terminal-input', (_e, id: string, data: string) => {
-  ptyProcesses.get(id)?.write(data)
+  const proc = ptyProcesses.get(id)
+  if (!proc) {
+    const message = '\r\n\x1b[31m[Terminal session is not running]\x1b[0m\r\n'
+    const sequence = appendTerminalOutput(id, message)
+    win?.webContents.send('terminal-data', id, message, sequence)
+    return false
+  }
+  proc.write(data)
+  return true
 })
 
 ipcMain.handle('terminal-resize', (_e, id: string, cols: number, rows: number) => {
@@ -236,6 +297,7 @@ ipcMain.handle('terminal-resize', (_e, id: string, cols: number, rows: number) =
 ipcMain.handle('terminal-kill', (_e, id: string) => {
   try { ptyProcesses.get(id)?.kill() } catch { /* already dead */ }
   ptyProcesses.delete(id)
+  terminalSessions.delete(id)
 })
 
 // ── App lifecycle ─────────────────────────────────────────────────

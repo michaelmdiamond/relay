@@ -4,6 +4,12 @@ interface Props {
   onSaved: () => void
 }
 
+const LOCAL_MODEL_SUGGESTIONS = [
+  { model: 'llama3.2:3b', label: 'Llama 3.2 3B', detail: 'small general model' },
+  { model: 'qwen2.5-coder:7b', label: 'Qwen Coder 7B', detail: 'better for code' },
+  { model: 'gemma3:4b', label: 'Gemma 3 4B', detail: 'balanced everyday use' },
+]
+
 export function ApiKeySetup({ onSaved }: Props) {
   const [anthropicKey, setAnthropicKey] = useState('')
   const [anthropicError, setAnthropicError] = useState('')
@@ -23,6 +29,9 @@ export function ApiKeySetup({ onSaved }: Props) {
   const [ollamaModel, setOllamaModel] = useState('')
   const [ollamaError, setOllamaError] = useState('')
   const [ollamaSaving, setOllamaSaving] = useState(false)
+  const [ollamaPhase, setOllamaPhase] = useState<'idle' | 'loading' | 'installing'>('idle')
+  const [ollamaAvailable, setOllamaAvailable] = useState<string[]>([])
+  const [ollamaInstallingModel, setOllamaInstallingModel] = useState('')
 
   async function handleSaveAnthropicKey() {
     const trimmed = anthropicKey.trim()
@@ -70,6 +79,37 @@ export function ApiKeySetup({ onSaved }: Props) {
     }
     setOllamaSaving(true)
     await window.api.setOllamaConfig(ollamaUrl.trim() || 'http://localhost:11434', model)
+    onSaved()
+  }
+
+  async function handleFindOllamaModels() {
+    setOllamaPhase('loading')
+    setOllamaError('')
+    const { models, error } = await window.api.getOllamaModels(ollamaUrl.trim() || 'http://localhost:11434')
+    setOllamaPhase('idle')
+    if (error || !models.length) {
+      setOllamaAvailable([])
+      setOllamaError(error ?? 'No local models found')
+      return
+    }
+    setOllamaAvailable(models)
+    setOllamaModel(models[0])
+  }
+
+  async function handleInstallOllamaModel(model: string) {
+    const baseUrl = ollamaUrl.trim() || 'http://localhost:11434'
+    setOllamaPhase('installing')
+    setOllamaInstallingModel(model)
+    setOllamaError('')
+    const result = await window.api.pullOllamaModel(model, baseUrl)
+    setOllamaPhase('idle')
+    setOllamaInstallingModel('')
+    if (!result.ok) {
+      setOllamaError(result.error ?? 'Could not install the local model')
+      return
+    }
+    setOllamaModel(model)
+    await window.api.setOllamaConfig(baseUrl, model)
     onSaved()
   }
 
@@ -234,15 +274,57 @@ export function ApiKeySetup({ onSaved }: Props) {
             style={inputStyle(ollamaError)}
           />
           {ollamaError && <p style={{ margin: 0, color: '#f87171', fontSize: 12 }}>{ollamaError}</p>}
+          {ollamaAvailable.length > 0 && (
+            <div className="relay-model-list">
+              {ollamaAvailable.map(model => (
+                <button key={model} type="button" className="relay-model-chip" onClick={() => setOllamaModel(model)}>
+                  {model}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={handleFindOllamaModels}
+            disabled={ollamaPhase !== 'idle'}
+            style={{
+              padding: '9px',
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'rgba(255,255,255,0.05)',
+              color: ollamaPhase === 'idle' ? 'rgba(255,255,255,0.72)' : 'rgba(255,255,255,0.35)',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: ollamaPhase === 'idle' ? 'pointer' : 'default',
+            }}
+          >
+            {ollamaPhase === 'loading' ? 'Checking Ollama…' : 'Find installed models'}
+          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>
+              {ollamaPhase === 'installing'
+                ? `Installing ${ollamaInstallingModel}… this can take a few minutes.`
+                : 'No model yet? Install a starter model.'}
+            </span>
+            {ollamaPhase !== 'installing' && (
+              <div className="relay-model-list relay-model-list--stacked">
+                {LOCAL_MODEL_SUGGESTIONS.map(item => (
+                  <button key={item.model} type="button" className="relay-model-chip relay-model-chip--wide" onClick={() => void handleInstallOllamaModel(item.model)}>
+                    <span>{item.label}</span>
+                    <span>{item.detail}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={handleSaveOllama}
-            disabled={!ollamaModel.trim() || ollamaSaving}
+            disabled={!ollamaModel.trim() || ollamaSaving || ollamaPhase !== 'idle'}
             style={{
               padding: '9px', borderRadius: 8, border: 'none',
-              background: !ollamaModel.trim() ? 'rgba(255,255,255,0.08)' : 'rgba(167,139,250,0.8)',
-              color: !ollamaModel.trim() ? 'rgba(255,255,255,0.3)' : '#fff',
+              background: !ollamaModel.trim() || ollamaPhase !== 'idle' ? 'rgba(255,255,255,0.08)' : 'rgba(167,139,250,0.8)',
+              color: !ollamaModel.trim() || ollamaPhase !== 'idle' ? 'rgba(255,255,255,0.3)' : '#fff',
               fontSize: 13, fontWeight: 600,
-              cursor: !ollamaModel.trim() ? 'default' : 'pointer',
+              cursor: !ollamaModel.trim() || ollamaPhase !== 'idle' ? 'default' : 'pointer',
             }}
           >
             {ollamaSaving ? 'Saving…' : 'Save'}

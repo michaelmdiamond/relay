@@ -22,6 +22,12 @@ const PROVIDERS: ProviderConfig[] = [
   { id: 'cursor',  label: 'Cursor',       accent: 'rgba(244,114,182,0.85)', accentDim: 'rgba(244,114,182,0.07)', connectorKey: 'cursor', skillKey: null,      staticModels: ['Composer', 'SDK models'] },
 ]
 
+const LOCAL_MODEL_SUGGESTIONS = [
+  { model: 'llama3.2:3b', label: 'Llama 3.2 3B', detail: 'small general model' },
+  { model: 'qwen2.5-coder:7b', label: 'Qwen Coder 7B', detail: 'better for code' },
+  { model: 'gemma3:4b', label: 'Gemma 3 4B', detail: 'balanced everyday use' },
+]
+
 // ── Sidebar item ──────────────────────────────────────────────────
 
 function SidebarItem({
@@ -183,9 +189,10 @@ export function ConnectionsDashboard() {
 
   const [ollamaModel, setOllamaModel] = useState<string | null>(null)
   const [ollamaReachable, setOllamaReachable] = useState(false)
-  const [ollamaPhase, setOllamaPhase] = useState<'idle' | 'loading' | 'picking' | 'error'>('idle')
+  const [ollamaPhase, setOllamaPhase] = useState<'idle' | 'loading' | 'picking' | 'installing' | 'error'>('idle')
   const [ollamaAvailable, setOllamaAvailable] = useState<string[]>([])
   const [ollamaSetupError, setOllamaSetupError] = useState('')
+  const [ollamaInstallingModel, setOllamaInstallingModel] = useState<string | null>(null)
 
   const geminiInputRef = useRef<HTMLInputElement>(null)
   const cursorInputRef = useRef<HTMLInputElement>(null)
@@ -253,6 +260,7 @@ export function ConnectionsDashboard() {
 
   async function handleConnectOllama() {
     setOllamaPhase('loading')
+    setOllamaSetupError('')
     const { models, error } = await window.api.getOllamaModels()
     if (error || !models.length) { setOllamaSetupError(error ?? 'No models found'); setOllamaPhase('error'); return }
     setOllamaAvailable(models); setOllamaPhase('picking')
@@ -260,6 +268,23 @@ export function ConnectionsDashboard() {
   async function handlePickModel(model: string) {
     await window.api.setOllamaConfig('http://localhost:11434', model)
     setOllamaReachable(false); setOllamaPhase('idle'); await refreshConnections()
+  }
+  async function handleInstallOllamaModel(model: string) {
+    setOllamaPhase('installing')
+    setOllamaInstallingModel(model)
+    setOllamaSetupError('')
+    const result = await window.api.pullOllamaModel(model, 'http://localhost:11434')
+    if (!result.ok) {
+      setOllamaSetupError(result.error ?? 'Could not install the local model.')
+      setOllamaInstallingModel(null)
+      setOllamaPhase('error')
+      return
+    }
+    await window.api.setOllamaConfig('http://localhost:11434', model)
+    setOllamaReachable(false)
+    setOllamaInstallingModel(null)
+    setOllamaPhase('idle')
+    await refreshConnections()
   }
   async function handleDisconnectOllama() {
     await window.api.disconnectOllama(); setOllamaReachable(false); setOllamaPhase('idle'); await refreshConnections()
@@ -358,15 +383,43 @@ export function ConnectionsDashboard() {
               {ollamaAvailable.map((m) => <button key={m} type="button" className="relay-model-chip" onClick={() => void handlePickModel(m)}>{m}</button>)}
             </div>
           </div>
+        ) : ollamaPhase === 'installing' ? (
+          <div className="relay-inline-form">
+            <span className="relay-inline-caption">Installing {ollamaInstallingModel}…</span>
+            <span className="relay-inline-hint">This can take a few minutes the first time.</span>
+          </div>
         ) : ollamaPhase === 'error' ? (
           <div className="relay-inline-form">
             <span className="relay-inline-error">{ollamaSetupError}</span>
-            <button type="button" className="relay-inline-btn" onClick={() => setOllamaPhase('idle')}>Dismiss</button>
+            <div className="relay-inline-actions">
+              <button type="button" className="relay-inline-btn" onClick={() => void handleConnectOllama()}>Try again</button>
+              <button type="button" className="relay-inline-btn relay-inline-btn--ghost" onClick={() => setOllamaPhase('idle')}>Dismiss</button>
+            </div>
+            <span className="relay-inline-caption">Or install a starter model</span>
+            <div className="relay-model-list relay-model-list--stacked">
+              {LOCAL_MODEL_SUGGESTIONS.map((item) => (
+                <button key={item.model} type="button" className="relay-model-chip relay-model-chip--wide" onClick={() => void handleInstallOllamaModel(item.model)}>
+                  <span>{item.label}</span>
+                  <span>{item.detail}</span>
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
-          <button type="button" className="relay-connect-btn relay-connect-btn--secondary" onClick={() => void handleConnectOllama()}>
-            {ollamaPhase === 'loading' ? 'Checking Ollama…' : 'Connect Ollama'}
-          </button>
+          <div className="relay-inline-form">
+            <button type="button" className="relay-connect-btn relay-connect-btn--secondary" onClick={() => void handleConnectOllama()}>
+              {ollamaPhase === 'loading' ? 'Checking Ollama…' : 'Use installed model'}
+            </button>
+            <span className="relay-inline-caption">No model installed yet? Pick one to download and configure.</span>
+            <div className="relay-model-list relay-model-list--stacked">
+              {LOCAL_MODEL_SUGGESTIONS.map((item) => (
+                <button key={item.model} type="button" className="relay-model-chip relay-model-chip--wide" onClick={() => void handleInstallOllamaModel(item.model)}>
+                  <span>{item.label}</span>
+                  <span>{item.detail}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )
 
       case 'cursor':

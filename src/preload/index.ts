@@ -41,6 +41,7 @@ const api: ChatApi = {
   disconnectOllama: () => ipcRenderer.invoke('disconnect-ollama'),
   checkOllamaReachable: () => ipcRenderer.invoke('check-ollama-reachable'),
   getOllamaModels: (baseUrl) => ipcRenderer.invoke('get-ollama-models', baseUrl),
+  pullOllamaModel: (model, baseUrl) => ipcRenderer.invoke('pull-ollama-model', model, baseUrl),
 
   getCursorKeyStatus: () => ipcRenderer.invoke('get-cursor-key-status'),
   setCursorKey: (key) => ipcRenderer.invoke('set-cursor-key', key),
@@ -96,14 +97,16 @@ const api: ChatApi = {
 contextBridge.exposeInMainWorld('api', api)
 
 const terminalApi: TerminalApi = {
-  createTerminal: (id, launcherId, cwd) => ipcRenderer.invoke('terminal-create', id, launcherId, cwd),
+  listTerminalSessions: () => ipcRenderer.invoke('terminal-list'),
+  getTerminalBuffer: (id) => ipcRenderer.invoke('terminal-buffer', id),
+  createTerminal: (id, launcherId, name, cwd) => ipcRenderer.invoke('terminal-create', id, launcherId, name, cwd),
   sendTerminalInput: (id, data) => ipcRenderer.invoke('terminal-input', id, data),
   resizeTerminal: (id, cols, rows) => ipcRenderer.invoke('terminal-resize', id, cols, rows),
   killTerminal: (id) => ipcRenderer.invoke('terminal-kill', id),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
 
   onTerminalData: (cb) => {
-    const listener = (_e: Electron.IpcRendererEvent, id: string, data: string) => cb(id, data)
+    const listener = (_e: Electron.IpcRendererEvent, id: string, data: string, sequence: number) => cb(id, data, sequence)
     ipcRenderer.on('terminal-data', listener)
     return () => ipcRenderer.off('terminal-data', listener)
   },

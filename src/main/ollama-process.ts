@@ -123,6 +123,48 @@ export async function startAndGetModels(baseUrl = DEFAULT_OLLAMA_URL): Promise<{
   }
 }
 
+export async function pullOllamaModel(model: string, baseUrl = DEFAULT_OLLAMA_URL): Promise<{ ok: boolean; error?: string }> {
+  const bin = findOllamaBinary()
+  if (!bin) {
+    openOllamaApp()
+    return {
+      ok: false,
+      error: 'Could not find the Ollama CLI. Install Ollama from ollama.com, then try again.',
+    }
+  }
+
+  if (!(await ping(baseUrl))) {
+    spawnBinary(bin)
+    if (!(await waitUntilReachable(baseUrl))) {
+      return { ok: false, error: 'Ollama did not start in time. Open Ollama, then try again.' }
+    }
+  }
+
+  return new Promise(resolve => {
+    const child = spawn(bin, ['pull', model], {
+      env: { ...process.env, PATH: BROAD_PATH, OLLAMA_HOST: baseUrl },
+    })
+    let output = ''
+    const collect = (chunk: Buffer) => {
+      output = `${output}${chunk.toString()}`
+      if (output.length > 4000) output = output.slice(-4000)
+    }
+    child.stdout?.on('data', collect)
+    child.stderr?.on('data', collect)
+    child.on('error', err => resolve({ ok: false, error: err.message }))
+    child.on('close', code => {
+      if (code === 0) {
+        resolve({ ok: true })
+        return
+      }
+      resolve({
+        ok: false,
+        error: output.trim() || `Ollama pull exited with code ${code ?? 'unknown'}.`,
+      })
+    })
+  })
+}
+
 export function stopOllamaProcess(): void {
   if (managedProcess) {
     managedProcess.kill('SIGTERM')
