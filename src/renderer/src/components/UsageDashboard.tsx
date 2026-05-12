@@ -227,6 +227,7 @@ export function UsageDashboard({ conversations }: Props) {
     anthropicMonthlyTokens: '',
     openaiMonthlyTokens: '',
     googleMonthlyTokens: '',
+    deepseekMonthlyTokens: '',
     ollamaMonthlyTokens: '',
   })
   const [saving, setSaving] = useState(false)
@@ -239,6 +240,7 @@ export function UsageDashboard({ conversations }: Props) {
         anthropicMonthlyTokens: loaded.anthropicMonthlyTokens ? String(loaded.anthropicMonthlyTokens) : '',
         openaiMonthlyTokens: loaded.openaiMonthlyTokens ? String(loaded.openaiMonthlyTokens) : '',
         googleMonthlyTokens: loaded.googleMonthlyTokens ? String(loaded.googleMonthlyTokens) : '',
+        deepseekMonthlyTokens: loaded.deepseekMonthlyTokens ? String(loaded.deepseekMonthlyTokens) : '',
         ollamaMonthlyTokens: loaded.ollamaMonthlyTokens ? String(loaded.ollamaMonthlyTokens) : '',
       })
     })
@@ -252,6 +254,7 @@ export function UsageDashboard({ conversations }: Props) {
         anthropicMonthlyTokens: draft.anthropicMonthlyTokens ? Number(draft.anthropicMonthlyTokens) : undefined,
         openaiMonthlyTokens: draft.openaiMonthlyTokens ? Number(draft.openaiMonthlyTokens) : undefined,
         googleMonthlyTokens: draft.googleMonthlyTokens ? Number(draft.googleMonthlyTokens) : undefined,
+        deepseekMonthlyTokens: draft.deepseekMonthlyTokens ? Number(draft.deepseekMonthlyTokens) : undefined,
         ollamaMonthlyTokens: draft.ollamaMonthlyTokens ? Number(draft.ollamaMonthlyTokens) : undefined,
       }
       const saved = await window.api.saveUsageLimits(next)
@@ -261,6 +264,7 @@ export function UsageDashboard({ conversations }: Props) {
         anthropicMonthlyTokens: saved.anthropicMonthlyTokens ? String(saved.anthropicMonthlyTokens) : '',
         openaiMonthlyTokens: saved.openaiMonthlyTokens ? String(saved.openaiMonthlyTokens) : '',
         googleMonthlyTokens: saved.googleMonthlyTokens ? String(saved.googleMonthlyTokens) : '',
+        deepseekMonthlyTokens: saved.deepseekMonthlyTokens ? String(saved.deepseekMonthlyTokens) : '',
         ollamaMonthlyTokens: saved.ollamaMonthlyTokens ? String(saved.ollamaMonthlyTokens) : '',
       })
     } finally {
@@ -341,6 +345,7 @@ export function UsageDashboard({ conversations }: Props) {
               ['anthropicMonthlyTokens', 'Anthropic'],
               ['openaiMonthlyTokens', 'OpenAI'],
               ['googleMonthlyTokens', 'Google'],
+              ['deepseekMonthlyTokens', 'DeepSeek'],
               ['ollamaMonthlyTokens', 'Ollama'],
             ] as Array<[keyof UsageLimitSettings, string]>).map(([key, label]) => (
               <label key={key} style={{ display: 'grid', gap: 6 }}>
@@ -402,6 +407,11 @@ export function UsageDashboard({ conversations }: Props) {
               label="Google"
               used={snapshot.byProvider.find(row => row.key === 'google')?.effectiveTotalTokens ?? 0}
               limit={limits.googleMonthlyTokens}
+            />
+            <LimitBar
+              label="DeepSeek"
+              used={snapshot.byProvider.find(row => row.key === 'deepseek')?.effectiveTotalTokens ?? 0}
+              limit={limits.deepseekMonthlyTokens}
             />
             <LimitBar
               label="Ollama"

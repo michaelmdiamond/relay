@@ -9,6 +9,14 @@ const api: ChatApi = {
   getSkills: () => ipcRenderer.invoke('get-skills'),
   getUsageLimits: () => ipcRenderer.invoke('get-usage-limits'),
   saveUsageLimits: (limits) => ipcRenderer.invoke('save-usage-limits', limits),
+  getTasks: () => ipcRenderer.invoke('get-tasks'),
+  createTask: (input) => ipcRenderer.invoke('create-task', input),
+  updateTask: (id, input) => ipcRenderer.invoke('update-task', id, input),
+  updateTaskState: (id, state) => ipcRenderer.invoke('update-task-state', id, state),
+  archiveTask: (id) => ipcRenderer.invoke('archive-task', id),
+  promoteConversationToTask: (conversationId, input) => ipcRenderer.invoke('promote-conversation-to-task', conversationId, input),
+  startTaskTerminal: (taskId, launcherId) => ipcRenderer.invoke('start-task-terminal', taskId, launcherId),
+  startTaskWorkflow: (taskId) => ipcRenderer.invoke('start-task-workflow', taskId),
   getAgentProfiles: () => ipcRenderer.invoke('get-agent-profiles'),
   saveAgentProfile: (profile) => ipcRenderer.invoke('save-agent-profile', profile),
   getWorkflowDefinitions: () => ipcRenderer.invoke('get-workflow-definitions'),
@@ -35,6 +43,12 @@ const api: ChatApi = {
   disconnectGemini: () => ipcRenderer.invoke('disconnect-gemini'),
   getGeminiModel: () => ipcRenderer.invoke('get-gemini-model'),
   setGeminiModel: (model) => ipcRenderer.invoke('set-gemini-model', model),
+
+  getDeepSeekKeyStatus: () => ipcRenderer.invoke('get-deepseek-key-status'),
+  setDeepSeekKey: (key) => ipcRenderer.invoke('set-deepseek-key', key),
+  disconnectDeepSeek: () => ipcRenderer.invoke('disconnect-deepseek'),
+  getDeepSeekModel: () => ipcRenderer.invoke('get-deepseek-model'),
+  setDeepSeekModel: (model) => ipcRenderer.invoke('set-deepseek-model', model),
 
   getOllamaStatus: () => ipcRenderer.invoke('get-ollama-status'),
   setOllamaConfig: (baseUrl, model) => ipcRenderer.invoke('set-ollama-config', baseUrl, model),
@@ -87,6 +101,18 @@ const api: ChatApi = {
     return () => ipcRenderer.off('chat-canceled', listener)
   },
 
+  onConversationsUpdated: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, conversations: unknown) => cb(conversations as never)
+    ipcRenderer.on('conversations-updated', listener)
+    return () => ipcRenderer.off('conversations-updated', listener)
+  },
+
+  onTasksUpdated: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, tasks: unknown) => cb(tasks as never)
+    ipcRenderer.on('tasks-updated', listener)
+    return () => ipcRenderer.off('tasks-updated', listener)
+  },
+
   onWorkflowRunUpdated: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, run: unknown) => cb(run as never)
     ipcRenderer.on('workflow-run-updated', listener)
@@ -99,11 +125,17 @@ contextBridge.exposeInMainWorld('api', api)
 const terminalApi: TerminalApi = {
   listTerminalSessions: () => ipcRenderer.invoke('terminal-list'),
   getTerminalBuffer: (id) => ipcRenderer.invoke('terminal-buffer', id),
-  createTerminal: (id, launcherId, name, cwd) => ipcRenderer.invoke('terminal-create', id, launcherId, name, cwd),
+  createTerminal: (id, launcherId, name, cwd, taskId) => ipcRenderer.invoke('terminal-create', id, launcherId, name, cwd, taskId),
   sendTerminalInput: (id, data) => ipcRenderer.invoke('terminal-input', id, data),
   resizeTerminal: (id, cols, rows) => ipcRenderer.invoke('terminal-resize', id, cols, rows),
   killTerminal: (id) => ipcRenderer.invoke('terminal-kill', id),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
+
+  onTerminalCreated: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, session: unknown) => cb(session as never)
+    ipcRenderer.on('terminal-created', listener)
+    return () => ipcRenderer.off('terminal-created', listener)
+  },
 
   onTerminalData: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, id: string, data: string, sequence: number) => cb(id, data, sequence)

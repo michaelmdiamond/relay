@@ -11,6 +11,7 @@ const DEFAULT_LIMITS: UsageLimitSettings = {
   anthropicMonthlyTokens: undefined,
   openaiMonthlyTokens: undefined,
   googleMonthlyTokens: undefined,
+  deepseekMonthlyTokens: undefined,
   ollamaMonthlyTokens: undefined,
 }
 
@@ -26,6 +27,7 @@ function normalizeLimits(limits?: UsageLimitSettings): UsageLimitSettings {
     anthropicMonthlyTokens: sanitizeLimit(limits?.anthropicMonthlyTokens),
     openaiMonthlyTokens: sanitizeLimit(limits?.openaiMonthlyTokens),
     googleMonthlyTokens: sanitizeLimit(limits?.googleMonthlyTokens),
+    deepseekMonthlyTokens: sanitizeLimit(limits?.deepseekMonthlyTokens),
     ollamaMonthlyTokens: sanitizeLimit(limits?.ollamaMonthlyTokens),
   }
 }

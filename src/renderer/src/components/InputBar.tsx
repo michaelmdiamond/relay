@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ModelSelector } from './ModelSelector'
-import type { CursorModelOption, GeminiModel, ModelChoice, SendMessageOptions, SkillEntry } from '../../../shared/types'
+import type { CursorModelOption, DeepSeekModel, GeminiModel, ModelChoice, SendMessageOptions, SkillEntry } from '../../../shared/types'
 
 const PROVIDER_COLOR: Record<'claude' | 'codex', string> = {
   claude: 'rgba(168,85,247,0.75)',
@@ -15,6 +15,8 @@ interface Props {
   onCodexModelChange?: (v: string) => void
   geminiModel?: GeminiModel
   onGeminiModelChange?: (v: GeminiModel) => void
+  deepSeekModel?: DeepSeekModel
+  onDeepSeekModelChange?: (v: DeepSeekModel) => void
   ollamaModel?: string | null
   ollamaModels?: string[]
   onOllamaModelChange?: (v: string) => void
@@ -38,6 +40,8 @@ export function InputBar({
   onCodexModelChange,
   geminiModel,
   onGeminiModelChange,
+  deepSeekModel,
+  onDeepSeekModelChange,
   ollamaModel,
   ollamaModels,
   onOllamaModelChange,
@@ -349,6 +353,8 @@ export function InputBar({
             onCodexModelChange={onCodexModelChange}
             geminiModel={geminiModel}
             onGeminiModelChange={onGeminiModelChange}
+            deepSeekModel={deepSeekModel}
+            onDeepSeekModelChange={onDeepSeekModelChange}
             ollamaModel={ollamaModel}
             ollamaModels={ollamaModels}
             onOllamaModelChange={onOllamaModelChange}

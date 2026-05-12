@@ -4,6 +4,7 @@ import * as path from 'path'
 import type { ConnectorEntry, ConnectorInventory, ConnectorProviderSnapshot } from '../shared/types'
 import { isOpenAIConnected } from './openai-auth'
 import { getGeminiModel, isGeminiConnected } from './gemini-auth'
+import { getDeepSeekModel, isDeepSeekConnected } from './deepseek-auth'
 import { isCursorConnected } from './cursor-auth'
 
 const HOME = process.env.HOME ?? ''
@@ -167,12 +168,38 @@ function readCursorSnapshot(): ConnectorProviderSnapshot {
   }
 }
 
+function readDeepSeekSnapshot(): ConnectorProviderSnapshot {
+  const auth = isDeepSeekConnected()
+  const items: ConnectorEntry[] = []
+
+  if (auth.configured) {
+    items.push(
+      makeEntry(
+        'deepseek:api-key',
+        'DeepSeek API key',
+        'configured',
+        `Model: ${getDeepSeekModel()}`
+      )
+    )
+  }
+
+  return {
+    provider: 'deepseek',
+    label: 'DeepSeek',
+    subtitle: auth.configured
+      ? `Direct API configuration - ${getDeepSeekModel()}`
+      : 'No DeepSeek connection detected',
+    items,
+  }
+}
+
 export function getConnectorInventory(): ConnectorInventory {
   return {
     providers: [
       readClaudeSnapshot(),
       readCodexSnapshot(),
       readGeminiSnapshot(),
+      readDeepSeekSnapshot(),
       readCursorSnapshot(),
     ],
     scannedAt: new Date().toISOString(),

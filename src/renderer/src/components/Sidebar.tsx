@@ -7,6 +7,8 @@ import { useChatStore } from '../store/chat'
 
 interface Props {
   onNew: () => void
+  onConversationSelect?: () => void
+  onUtilitySelect?: () => void
 }
 
 interface ProjectGroup {
@@ -15,14 +17,10 @@ interface ProjectGroup {
   conversations: Conversation[]
 }
 
+const PROJECT_CONVERSATION_PREVIEW_LIMIT = 5
+
 function projectKey(project: ProjectGroup): string {
   return project.path ?? project.name
-}
-
-function sourceLabel(source?: Conversation['source']): string {
-  if (source === 'claude') return 'Claude'
-  if (source === 'codex') return 'Codex'
-  return 'Relay'
 }
 
 function formatRelativeTime(value: string): string {
@@ -102,26 +100,16 @@ function FolderIcon() {
   )
 }
 
-function SlidersIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M4 5h12M7 10h9M10 15h6" />
-      <circle cx="10" cy="5" r="1.4" />
-      <circle cx="5" cy="10" r="1.4" />
-      <circle cx="7.5" cy="15" r="1.4" />
-    </svg>
-  )
-}
-
 function countConnectorItems(inventory: ConnectorInventory | null): number {
   if (!inventory) return 0
   return inventory.providers.reduce((count, provider) => count + provider.items.length, 0)
 }
 
-export function Sidebar({ onNew }: Props) {
+export function Sidebar({ onNew, onConversationSelect, onUtilitySelect }: Props) {
   const { conversations, activeId, activePane, setActiveId, setActivePane, removeConversation } = useChatStore()
   const [searchTerm, setSearchTerm] = useState('')
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({})
+  const [expandedProjectHistory, setExpandedProjectHistory] = useState<Record<string, boolean>>({})
   const [connectorInventory, setConnectorInventory] = useState<ConnectorInventory | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -168,23 +156,21 @@ export function Sidebar({ onNew }: Props) {
       })
     })
 
-    const projects = Array.from(projectMap.values()).sort((a, b) => {
-      const aNewest = a.conversations[0]?.createdAt ?? ''
-      const bNewest = b.conversations[0]?.createdAt ?? ''
+    const projects = Array.from(projectMap.values()).map((project) => ({
+      ...project,
+      conversations: [...project.conversations].sort((a, b) => {
+        const aTime = a.updatedAt ?? a.createdAt
+        const bTime = b.updatedAt ?? b.createdAt
+        return bTime.localeCompare(aTime)
+      }),
+    })).sort((a, b) => {
+      const aNewest = a.conversations[0]?.updatedAt ?? a.conversations[0]?.createdAt ?? ''
+      const bNewest = b.conversations[0]?.updatedAt ?? b.conversations[0]?.createdAt ?? ''
       return bNewest.localeCompare(aNewest)
     })
 
     return { projects, unassigned }
   }, [filteredConversations])
-
-  const activeProjectKey = useMemo(() => {
-    for (const project of grouped.projects) {
-      if (project.conversations.some(conv => conv.id === activeId)) {
-        return projectKey(project)
-      }
-    }
-    return null
-  }, [activeId, grouped.projects])
 
   async function handleDelete(event: React.MouseEvent, id: string) {
     event.stopPropagation()
@@ -200,6 +186,24 @@ export function Sidebar({ onNew }: Props) {
     }))
   }
 
+  function handleShowMoreProject(project: ProjectGroup) {
+    const key = projectKey(project)
+    setExpandedProjectHistory((current) => ({
+      ...current,
+      [key]: true,
+    }))
+  }
+
+  function handleSelectConversation(id: string) {
+    setActiveId(id)
+    onConversationSelect?.()
+  }
+
+  function handleSelectUtility(pane: 'usage' | 'connections') {
+    setActivePane(pane)
+    onUtilitySelect?.()
+  }
+
   return (
     <aside className="relay-sidebar">
       <div className="relay-sidebar__top">
@@ -208,20 +212,21 @@ export function Sidebar({ onNew }: Props) {
           <span className="relay-nav-action__label">New chat</span>
         </button>
 
-        <button
-          type="button"
-          className={`relay-nav-action${activePane === 'usage' ? ' is-active' : ''}`}
-          onClick={() => setActivePane('usage')}
-        >
-          <span className="relay-nav-action__icon"><ChartIcon /></span>
-          <span className="relay-nav-action__label">Usage</span>
-          <span className="relay-nav-action__meta">Live</span>
-        </button>
+        <div className="relay-search-shell">
+          <SearchIcon />
+          <input
+            ref={searchInputRef}
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className="relay-search-input"
+            placeholder="Search"
+          />
+        </div>
 
         <button
           type="button"
           className={`relay-nav-action${activePane === 'connections' ? ' is-active' : ''}`}
-          onClick={() => setActivePane('connections')}
+          onClick={() => handleSelectUtility('connections')}
         >
           <span className="relay-nav-action__icon"><PlugIcon /></span>
           <span className="relay-nav-action__label">Connections</span>
@@ -234,16 +239,15 @@ export function Sidebar({ onNew }: Props) {
           <span className="relay-nav-action__meta">Soon</span>
         </button>
 
-        <div className="relay-search-shell">
-          <SearchIcon />
-          <input
-            ref={searchInputRef}
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            className="relay-search-input"
-            placeholder="Search chats and projects"
-          />
-        </div>
+        <button
+          type="button"
+          className={`relay-nav-action relay-nav-action--secondary${activePane === 'usage' ? ' is-active' : ''}`}
+          onClick={() => handleSelectUtility('usage')}
+        >
+          <span className="relay-nav-action__icon"><ChartIcon /></span>
+          <span className="relay-nav-action__label">Usage</span>
+          <span className="relay-nav-action__meta">Live</span>
+        </button>
       </div>
 
       <div className="relay-sidebar__content">
@@ -251,9 +255,6 @@ export function Sidebar({ onNew }: Props) {
             <section className="relay-sidebar-section">
               <div className="relay-sidebar-section__header">
                 <span className="relay-sidebar-section__label">Projects</span>
-                <span className="relay-sidebar-section__tools">
-                  <SlidersIcon />
-                </span>
               </div>
 
               {grouped.projects.length === 0 && (
@@ -262,8 +263,16 @@ export function Sidebar({ onNew }: Props) {
 
               {grouped.projects.map((project) => {
                 const key = projectKey(project)
-                const isActiveProject = key === activeProjectKey
-                const isCollapsed = isActiveProject ? false : (collapsedProjects[key] ?? true)
+                const hasActiveConversation = project.conversations.some((conv) => conv.id === activeId)
+                const isCollapsed = collapsedProjects[key] ?? !hasActiveConversation
+                const activeConversationIndex = project.conversations.findIndex((conv) => conv.id === activeId)
+                const activeConversationNeedsExpansion = activeConversationIndex >= PROJECT_CONVERSATION_PREVIEW_LIMIT
+                const searchIsActive = searchTerm.trim().length > 0
+                const isHistoryExpanded = (expandedProjectHistory[key] ?? false) || activeConversationNeedsExpansion || searchIsActive
+                const visibleConversations = isHistoryExpanded
+                  ? project.conversations
+                  : project.conversations.slice(0, PROJECT_CONVERSATION_PREVIEW_LIMIT)
+                const hiddenConversationCount = project.conversations.length - visibleConversations.length
 
                 return (
                   <div key={key} className="relay-project-group">
@@ -280,23 +289,17 @@ export function Sidebar({ onNew }: Props) {
 
                     {!isCollapsed && (
                       <div className="relay-project-group__list">
-                        {project.conversations.map((conv) => {
+                        {visibleConversations.map((conv) => {
                           const isActive = conv.id === activeId
                           return (
                             <button
                               key={conv.id}
                               type="button"
                               className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
-                              onClick={() => setActiveId(conv.id)}
+                              onClick={() => handleSelectConversation(conv.id)}
                             >
                               <span className="relay-conversation-item__main">
-                                {isActive && <span className="relay-conversation-item__dot" />}
-                                <span className="relay-conversation-item__text">
-                                  <span className="relay-conversation-item__title">{conv.title}</span>
-                                  <span className={`relay-conversation-item__source source-${conv.source ?? 'relay'}`}>
-                                    {sourceLabel(conv.source)}
-                                  </span>
-                                </span>
+                                <span className="relay-conversation-item__title">{conv.title}</span>
                               </span>
                               <span className="relay-conversation-item__side">
                                 <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
@@ -312,6 +315,15 @@ export function Sidebar({ onNew }: Props) {
                             </button>
                           )
                         })}
+                        {hiddenConversationCount > 0 && (
+                          <button
+                            type="button"
+                            className="relay-project-group__more"
+                            onClick={() => handleShowMoreProject(project)}
+                          >
+                            See more
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -325,7 +337,7 @@ export function Sidebar({ onNew }: Props) {
                   <span className="relay-sidebar-section__label">Chats</span>
                 </div>
 
-                <div className="relay-project-group__list">
+                <div className="relay-project-group__list relay-project-group__list--root">
                   {grouped.unassigned.map((conv) => {
                     const isActive = conv.id === activeId
                     return (
@@ -333,16 +345,10 @@ export function Sidebar({ onNew }: Props) {
                         key={conv.id}
                         type="button"
                         className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
-                        onClick={() => setActiveId(conv.id)}
+                        onClick={() => handleSelectConversation(conv.id)}
                       >
                         <span className="relay-conversation-item__main">
-                          {isActive && <span className="relay-conversation-item__dot" />}
-                          <span className="relay-conversation-item__text">
-                            <span className="relay-conversation-item__title">{conv.title}</span>
-                            <span className={`relay-conversation-item__source source-${conv.source ?? 'relay'}`}>
-                              {sourceLabel(conv.source)}
-                            </span>
-                          </span>
+                          <span className="relay-conversation-item__title">{conv.title}</span>
                         </span>
                         <span className="relay-conversation-item__side">
                           <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>

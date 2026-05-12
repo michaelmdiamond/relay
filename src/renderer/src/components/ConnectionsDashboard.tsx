@@ -18,6 +18,7 @@ const PROVIDERS: ProviderConfig[] = [
   { id: 'claude',  label: 'Claude',       accent: 'rgba(255,196,122,0.85)', accentDim: 'rgba(255,196,122,0.07)', connectorKey: 'claude', skillKey: 'claude', staticModels: ['Haiku', 'Sonnet', 'Opus'] },
   { id: 'openai',  label: 'OpenAI Codex', accent: 'rgba(92,200,122,0.85)',  accentDim: 'rgba(92,200,122,0.07)',  connectorKey: 'codex',  skillKey: 'codex',  staticModels: [...CODEX_MODELS] },
   { id: 'gemini',  label: 'Gemini',       accent: 'rgba(125,184,255,0.85)', accentDim: 'rgba(125,184,255,0.07)', connectorKey: 'gemini', skillKey: null,      staticModels: ['2.5 Pro', 'Flash', 'Flash-Lite'] },
+  { id: 'deepseek', label: 'DeepSeek',    accent: 'rgba(56,189,248,0.85)',  accentDim: 'rgba(56,189,248,0.07)',  connectorKey: 'deepseek', skillKey: null,   staticModels: ['V4 Flash', 'V4 Pro'] },
   { id: 'ollama',  label: 'Ollama',       accent: 'rgba(111,212,255,0.85)', accentDim: 'rgba(111,212,255,0.07)', connectorKey: null,     skillKey: null,      staticModels: [] },
   { id: 'cursor',  label: 'Cursor',       accent: 'rgba(244,114,182,0.85)', accentDim: 'rgba(244,114,182,0.07)', connectorKey: 'cursor', skillKey: null,      staticModels: ['Composer', 'SDK models'] },
 ]
@@ -181,6 +182,11 @@ export function ConnectionsDashboard() {
   const [geminiKeyInput, setGeminiKeyInput] = useState('')
   const [geminiKeyError, setGeminiKeyError] = useState('')
 
+  const [deepSeekConfigured, setDeepSeekConfigured] = useState(false)
+  const [deepSeekKeyOpen, setDeepSeekKeyOpen] = useState(false)
+  const [deepSeekKeyInput, setDeepSeekKeyInput] = useState('')
+  const [deepSeekKeyError, setDeepSeekKeyError] = useState('')
+
   const [cursorConfigured, setCursorConfigured] = useState(false)
   const [cursorLabel, setCursorLabel] = useState<string | null>(null)
   const [cursorKeyOpen, setCursorKeyOpen] = useState(false)
@@ -195,10 +201,12 @@ export function ConnectionsDashboard() {
   const [ollamaInstallingModel, setOllamaInstallingModel] = useState<string | null>(null)
 
   const geminiInputRef = useRef<HTMLInputElement>(null)
+  const deepSeekInputRef = useRef<HTMLInputElement>(null)
   const cursorInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { void refreshConnections() }, [])
   useEffect(() => { if (geminiKeyOpen) geminiInputRef.current?.focus() }, [geminiKeyOpen])
+  useEffect(() => { if (deepSeekKeyOpen) deepSeekInputRef.current?.focus() }, [deepSeekKeyOpen])
   useEffect(() => { if (cursorKeyOpen) cursorInputRef.current?.focus() }, [cursorKeyOpen])
 
   useEffect(() => {
@@ -211,10 +219,11 @@ export function ConnectionsDashboard() {
   }, [ollamaModel])
 
   async function refreshConnections() {
-    const [anthropic, openAI, gemini, ollama, cursor, inventory, skillList] = await Promise.all([
+    const [anthropic, openAI, gemini, deepseek, ollama, cursor, inventory, skillList] = await Promise.all([
       window.api.getApiKeyStatus(),
       window.api.getOpenAIAuthStatus(),
       window.api.getGeminiKeyStatus(),
+      window.api.getDeepSeekKeyStatus(),
       window.api.getOllamaStatus(),
       window.api.getCursorKeyStatus(),
       window.api.getConnectorInventory(),
@@ -223,6 +232,7 @@ export function ConnectionsDashboard() {
     setAnthropicConfigured(anthropic.configured)
     setOpenAIEmail(openAI.connected ? (openAI.email ?? 'Connected') : null)
     setGeminiConfigured(gemini.configured)
+    setDeepSeekConfigured(deepseek.configured)
     setCursorConfigured(cursor.configured)
     setCursorLabel(cursor.userEmail ?? cursor.apiKeyName ?? (cursor.configured ? 'Cursor connected' : null))
     setOllamaModel(ollama.configured && ollama.model ? ollama.model : null)
@@ -246,6 +256,15 @@ export function ConnectionsDashboard() {
     await refreshConnections()
   }
   async function handleDisconnectGemini() { await window.api.disconnectGemini(); await refreshConnections() }
+
+  async function handleSaveDeepSeekKey() {
+    const trimmed = deepSeekKeyInput.trim()
+    if (!trimmed) { setDeepSeekKeyError('Enter a DeepSeek API key'); return }
+    await window.api.setDeepSeekKey(trimmed)
+    setDeepSeekKeyOpen(false); setDeepSeekKeyInput(''); setDeepSeekKeyError('')
+    await refreshConnections()
+  }
+  async function handleDisconnectDeepSeek() { await window.api.disconnectDeepSeek(); await refreshConnections() }
 
   async function handleSaveCursorKey() {
     const trimmed = cursorKeyInput.trim()
@@ -296,6 +315,7 @@ export function ConnectionsDashboard() {
     if (id === 'claude')  return anthropicConfigured
     if (id === 'openai')  return !!openAIEmail
     if (id === 'gemini')  return geminiConfigured
+    if (id === 'deepseek') return deepSeekConfigured
     if (id === 'ollama')  return !!ollamaModel
     if (id === 'cursor')  return cursorConfigured
     return false
@@ -420,6 +440,28 @@ export function ConnectionsDashboard() {
               ))}
             </div>
           </div>
+        )
+
+      case 'deepseek':
+        return deepSeekConfigured ? (
+          <div className="relay-connection-item">
+            <span className="relay-connection-item__status is-gemini" />
+            <span className="relay-connection-item__label">DeepSeek connected</span>
+            <button type="button" className="relay-connection-item__action" onClick={() => void handleDisconnectDeepSeek()}>Disconnect</button>
+          </div>
+        ) : deepSeekKeyOpen ? (
+          <div className="relay-inline-form">
+            <input ref={deepSeekInputRef} type="password" value={deepSeekKeyInput} onChange={(e) => { setDeepSeekKeyInput(e.target.value); setDeepSeekKeyError('') }}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveDeepSeekKey(); if (e.key === 'Escape') { setDeepSeekKeyOpen(false); setDeepSeekKeyInput(''); setDeepSeekKeyError('') } }}
+              className="relay-inline-input" placeholder="DeepSeek API key" />
+            {deepSeekKeyError && <span className="relay-inline-error">{deepSeekKeyError}</span>}
+            <div className="relay-inline-actions">
+              <button type="button" className="relay-inline-btn" onClick={() => void handleSaveDeepSeekKey()}>Save</button>
+              <button type="button" className="relay-inline-btn relay-inline-btn--ghost" onClick={() => { setDeepSeekKeyOpen(false); setDeepSeekKeyInput(''); setDeepSeekKeyError('') }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className="relay-connect-btn relay-connect-btn--secondary" onClick={() => setDeepSeekKeyOpen(true)}>Add DeepSeek key</button>
         )
 
       case 'cursor':

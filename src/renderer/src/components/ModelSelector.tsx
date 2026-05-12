@@ -1,14 +1,15 @@
 import { useState } from 'react'
 import { CODEX_MODELS } from '../../../shared/types'
-import type { CursorModelOption, GeminiModel, ModelChoice } from '../../../shared/types'
+import type { CursorModelOption, DeepSeekModel, GeminiModel, ModelChoice } from '../../../shared/types'
 
-type TopLevelChoice = 'auto' | 'claude' | 'codex' | 'gemini' | 'ollama' | 'cursor'
+type TopLevelChoice = 'auto' | 'claude' | 'codex' | 'gemini' | 'deepseek' | 'ollama' | 'cursor'
 
 const OPTIONS: { value: TopLevelChoice; label: string; sub: string }[] = [
   { value: 'auto',   label: 'Auto',   sub: 'router picks' },
   { value: 'claude', label: 'Claude', sub: 'Anthropic' },
   { value: 'codex',  label: 'Codex',  sub: 'GPT subscription' },
   { value: 'gemini', label: 'Gemini', sub: 'Google key' },
+  { value: 'deepseek', label: 'DeepSeek', sub: 'API key' },
   { value: 'ollama', label: 'Local',  sub: 'Ollama' },
   { value: 'cursor', label: 'Cursor', sub: 'SDK agent' },
 ]
@@ -34,6 +35,11 @@ const GEMINI_MODELS: { value: GeminiModel; label: string; sub: string }[] = [
   { value: 'gemini-2.5-pro',        label: 'Pro',        sub: 'most capable' },
 ]
 
+const DEEPSEEK_MODELS: { value: DeepSeekModel; label: string; sub: string }[] = [
+  { value: 'deepseek-v4-flash', label: 'Flash', sub: 'default' },
+  { value: 'deepseek-v4-pro', label: 'Pro', sub: 'thinking' },
+]
+
 interface Props {
   value: ModelChoice
   onChange: (v: ModelChoice) => void
@@ -42,6 +48,8 @@ interface Props {
   onCodexModelChange?: (v: string) => void
   geminiModel?: GeminiModel
   onGeminiModelChange?: (v: GeminiModel) => void
+  deepSeekModel?: DeepSeekModel
+  onDeepSeekModelChange?: (v: DeepSeekModel) => void
   ollamaModel?: string | null
   ollamaModels?: string[]
   onOllamaModelChange?: (v: string) => void
@@ -62,6 +70,8 @@ export function ModelSelector({
   onCodexModelChange,
   geminiModel,
   onGeminiModelChange,
+  deepSeekModel,
+  onDeepSeekModelChange,
   ollamaModel,
   ollamaModels,
   onOllamaModelChange,
@@ -201,6 +211,32 @@ export function ModelSelector({
                 fontWeight: geminiModel === opt.value ? 600 : 400,
                 background: geminiModel === opt.value ? 'rgba(52,211,153,0.12)' : 'transparent',
                 color: geminiModel === opt.value ? '#34d399' : 'rgba(255,255,255,0.35)',
+                transition: 'all 0.15s',
+              }}
+            >
+              {opt.label}
+              <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>{opt.sub}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {topLevelValue === 'deepseek' && showSubmenu && onDeepSeekModelChange && (
+        <div style={{ display: 'flex', gap: 4, paddingLeft: 2 }}>
+          {DEEPSEEK_MODELS.map(opt => (
+            <button
+              key={opt.value}
+              disabled={disabled}
+              onClick={() => onDeepSeekModelChange(opt.value)}
+              style={{
+                padding: '3px 8px',
+                borderRadius: 5,
+                border: `1px solid ${deepSeekModel === opt.value ? 'rgba(56,189,248,0.4)' : 'transparent'}`,
+                cursor: disabled ? 'default' : 'pointer',
+                fontSize: 11,
+                fontWeight: deepSeekModel === opt.value ? 600 : 400,
+                background: deepSeekModel === opt.value ? 'rgba(56,189,248,0.12)' : 'transparent',
+                color: deepSeekModel === opt.value ? '#7dd3fc' : 'rgba(255,255,255,0.35)',
                 transition: 'all 0.15s',
               }}
             >

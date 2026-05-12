@@ -19,6 +19,10 @@ export function ApiKeySetup({ onSaved }: Props) {
   const [geminiError, setGeminiError] = useState('')
   const [geminiSaving, setGeminiSaving] = useState(false)
 
+  const [deepSeekKey, setDeepSeekKey] = useState('')
+  const [deepSeekError, setDeepSeekError] = useState('')
+  const [deepSeekSaving, setDeepSeekSaving] = useState(false)
+
   const [cursorKey, setCursorKey] = useState('')
   const [cursorError, setCursorError] = useState('')
   const [cursorSaving, setCursorSaving] = useState(false)
@@ -69,6 +73,17 @@ export function ApiKeySetup({ onSaved }: Props) {
       setCursorSaving(false)
       setCursorError(error instanceof Error ? error.message : 'Could not save Cursor key')
     }
+  }
+
+  async function handleSaveDeepSeekKey() {
+    const trimmed = deepSeekKey.trim()
+    if (!trimmed) {
+      setDeepSeekError('Enter a DeepSeek API key')
+      return
+    }
+    setDeepSeekSaving(true)
+    await window.api.setDeepSeekKey(trimmed)
+    onSaved()
   }
 
   async function handleSaveOllama() {
@@ -401,6 +416,49 @@ export function ApiKeySetup({ onSaved }: Props) {
             }}
           >
             {geminiSaving ? 'Saving…' : 'Save API key'}
+          </button>
+        </div>
+
+        {/* DeepSeek */}
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>DeepSeek</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
+              Chat + Reasoner ·{' '}
+              <a
+                href="https://platform.deepseek.com/api_keys"
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: 'rgba(56,189,248,0.7)', textDecoration: 'none' }}
+              >
+                Get key at platform.deepseek.com
+              </a>
+            </span>
+          </div>
+          <input
+            type="password"
+            value={deepSeekKey}
+            onChange={e => { setDeepSeekKey(e.target.value); setDeepSeekError('') }}
+            placeholder="sk-..."
+            onKeyDown={e => e.key === 'Enter' && handleSaveDeepSeekKey()}
+            style={inputStyle(deepSeekError)}
+          />
+          {deepSeekError && <p style={{ margin: 0, color: '#f87171', fontSize: 12 }}>{deepSeekError}</p>}
+          <button
+            onClick={handleSaveDeepSeekKey}
+            disabled={!deepSeekKey.trim() || deepSeekSaving}
+            style={{
+              padding: '9px',
+              borderRadius: 8,
+              border: 'none',
+              background: !deepSeekKey.trim() ? 'rgba(255,255,255,0.08)' : 'rgba(56,189,248,0.8)',
+              color: !deepSeekKey.trim() ? 'rgba(255,255,255,0.3)' : '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: !deepSeekKey.trim() ? 'default' : 'pointer',
+            }}
+          >
+            {deepSeekSaving ? 'Saving…' : 'Save API key'}
           </button>
         </div>
       </div>

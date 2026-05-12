@@ -6,7 +6,7 @@ import { UsageDashboard } from './UsageDashboard'
 import { ConnectionsDashboard } from './ConnectionsDashboard'
 import { useChatStore } from '../store/chat'
 import { CODEX_MODELS } from '../../../shared/types'
-import type { ChatMessage, ConversationMemory, CursorModelOption, GeminiModel, SendMessageOptions } from '../../../shared/types'
+import type { ChatMessage, Conversation, ConversationMemory, CursorModelOption, DeepSeekModel, GeminiModel, SendMessageOptions, TaskState } from '../../../shared/types'
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat('en-US').format(value)
@@ -55,12 +55,12 @@ function MemoryPanel({
   memory,
   onSave,
   onCompact,
-  onWorkflowHandoff,
+  onPromoteToTask,
 }: {
   memory: ConversationMemory
   onSave: (memory: ConversationMemory) => void
   onCompact: () => void
-  onWorkflowHandoff: () => void
+  onPromoteToTask: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [activeGoal, setActiveGoal] = useState(memory.activeGoal ?? '')
@@ -110,7 +110,7 @@ function MemoryPanel({
           </span>
         )}
         <button type="button" onClick={onCompact} style={smallActionStyle}>Compact now</button>
-        <button type="button" onClick={onWorkflowHandoff} style={smallActionStyle}>Handoff to workflow</button>
+        <button type="button" onClick={onPromoteToTask} style={smallActionStyle}>Promote to task</button>
       </div>
       {open && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginTop: 10 }}>
@@ -136,6 +136,84 @@ function MemoryPanel({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function latestUserMessage(conversation: Conversation): string {
+  return [...conversation.messages].reverse().find((message) => message.role === 'user')?.content ?? ''
+}
+
+function promotionDefaults(conversation: Conversation): { title: string; brief: string } {
+  const activeGoal = conversation.memory?.activeGoal?.trim()
+  const latestUser = latestUserMessage(conversation).trim()
+  const summary = conversation.memory?.summary?.trim()
+  const titleSource = activeGoal || latestUser || conversation.title
+  const title = titleSource.split('\n')[0].slice(0, 72) || 'Untitled task'
+  const brief = [
+    activeGoal,
+    latestUser && latestUser !== activeGoal ? latestUser : '',
+    summary ? `Context summary: ${summary}` : '',
+  ].filter(Boolean).join('\n\n')
+  return { title, brief }
+}
+
+function PromoteTaskModal({
+  title,
+  brief,
+  state,
+  saving,
+  onTitleChange,
+  onBriefChange,
+  onStateChange,
+  onCancel,
+  onSubmit,
+}: {
+  title: string
+  brief: string
+  state: TaskState
+  saving: boolean
+  onTitleChange: (value: string) => void
+  onBriefChange: (value: string) => void
+  onStateChange: (value: TaskState) => void
+  onCancel: () => void
+  onSubmit: () => void
+}) {
+  return (
+    <div className="promote-modal" role="dialog" aria-modal="true" aria-label="Promote chat to task">
+      <div className="promote-modal__panel">
+        <div className="promote-modal__header">
+          <div>
+            <div className="promote-modal__eyebrow">Task promotion</div>
+            <div className="promote-modal__title">Promote chat to task</div>
+          </div>
+          <button type="button" className="promote-modal__close" onClick={onCancel}>x</button>
+        </div>
+        <label className="promote-modal__field">
+          <span>Title</span>
+          <input value={title} onChange={(event) => onTitleChange(event.target.value)} />
+        </label>
+        <label className="promote-modal__field">
+          <span>Brief</span>
+          <textarea value={brief} rows={7} onChange={(event) => onBriefChange(event.target.value)} />
+        </label>
+        <label className="promote-modal__field">
+          <span>Initial state</span>
+          <select value={state} onChange={(event) => onStateChange(event.target.value as TaskState)}>
+            <option value="idea">Idea</option>
+            <option value="running">Running</option>
+            <option value="blocked">Blocked</option>
+            <option value="review">Review</option>
+            <option value="done">Done</option>
+          </select>
+        </label>
+        <div className="promote-modal__actions">
+          <button type="button" onClick={onCancel}>Cancel</button>
+          <button type="button" className="promote-modal__primary" disabled={!title.trim() || saving} onClick={onSubmit}>
+            {saving ? 'Creating...' : 'Create task'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -172,11 +250,12 @@ const memoryTextStyle: CSSProperties = {
   lineHeight: 1.45,
 }
 
-export function ChatPane() {
+export function ChatPane({ onOpenTerminals }: { onOpenTerminals?: () => void }) {
   const { conversations, activeId, activePane, modelChoice, sending, setModelChoice, setSending, replaceConversation } = useChatStore()
   const [codexModel, setCodexModelState] = useState<string>(CODEX_MODELS[0])
   const [codexModels, setCodexModels] = useState<string[]>([...CODEX_MODELS])
   const [geminiModel, setGeminiModelState] = useState<GeminiModel>('gemini-2.5-flash')
+  const [deepSeekModel, setDeepSeekModelState] = useState<DeepSeekModel>('deepseek-v4-flash')
   const [ollamaModel, setOllamaModelState] = useState<string | null>(null)
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState('http://localhost:11434')
@@ -184,21 +263,31 @@ export function ChatPane() {
   const [cursorModels, setCursorModels] = useState<CursorModelOption[]>([])
   const [cursorModelsLoading, setCursorModelsLoading] = useState(false)
   const [cursorModelsError, setCursorModelsError] = useState('')
+  const [promoteOpen, setPromoteOpen] = useState(false)
+  const [promoteTitle, setPromoteTitle] = useState('')
+  const [promoteBrief, setPromoteBrief] = useState('')
+  const [promoteState, setPromoteState] = useState<TaskState>('idea')
+  const [promoteSaving, setPromoteSaving] = useState(false)
+  const [promoteStatus, setPromoteStatus] = useState('')
   const conversation = conversations.find(c => c.id === activeId)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesRef = useRef<HTMLDivElement>(null)
+  const [autoFollow, setAutoFollow] = useState(true)
   const usageSummary = conversation ? buildUsageSummary(conversation.messages) : []
   const readOnly = !!conversation?.readOnly
 
   useEffect(() => {
     async function loadProviderState() {
-      const [codex, gemini, ollama, cursor] = await Promise.all([
+      const [codex, gemini, deepSeek, ollama, cursor] = await Promise.all([
         window.api.getCodexModel(),
         window.api.getGeminiModel(),
+        window.api.getDeepSeekModel(),
         window.api.getOllamaStatus(),
         window.api.getCursorKeyStatus(),
       ])
       setCodexModelState(codex)
       setGeminiModelState(gemini)
+      setDeepSeekModelState(deepSeek)
       const baseUrl = ollama.baseUrl ?? 'http://localhost:11434'
       setOllamaBaseUrl(baseUrl)
       setOllamaModelState(ollama.configured && ollama.model ? ollama.model : null)
@@ -244,6 +333,11 @@ export function ChatPane() {
     await window.api.setGeminiModel(model)
   }
 
+  async function handleDeepSeekModelChange(model: DeepSeekModel) {
+    setDeepSeekModelState(model)
+    await window.api.setDeepSeekModel(model)
+  }
+
   async function handleCodexModelChange(model: string) {
     setCodexModelState(model)
     await window.api.setCodexModel(model)
@@ -260,8 +354,26 @@ export function ChatPane() {
   }
 
   useEffect(() => {
+    setAutoFollow(true)
+  }, [activeId])
+
+  useEffect(() => {
+    if (!autoFollow) return
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [conversation?.messages.length, conversation?.messages.at(-1)?.content])
+  }, [autoFollow, conversation?.messages.length, conversation?.messages.at(-1)?.content])
+
+  function handleMessagesScroll() {
+    const el = messagesRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight)
+    // Stop auto-follow once the user scrolls meaningfully away from latest messages.
+    setAutoFollow(distanceFromBottom < 72)
+  }
+
+  function jumpToLatest() {
+    setAutoFollow(true)
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
 
   useEffect(() => {
     const unsub0 = window.api.onStreamStart((convId, msgId, routing) => {
@@ -317,16 +429,31 @@ export function ChatPane() {
     if (next) replaceConversation(next)
   }
 
-  async function handleWorkflowHandoff() {
+  function openPromotion() {
     if (!conversation) return
-    const goal = [
-      conversation.memory?.activeGoal,
-      conversation.messages.at(-1)?.content,
-      conversation.memory?.summary ? `Context summary: ${conversation.memory.summary}` : '',
-    ].filter(Boolean).join('\n\n')
-    const workflows = await window.api.getWorkflowDefinitions()
-    if (workflows[0] && goal.trim()) {
-      await window.api.startWorkflowRun(workflows[0].id, goal.trim())
+    const defaults = promotionDefaults(conversation)
+    setPromoteTitle(defaults.title)
+    setPromoteBrief(defaults.brief)
+    setPromoteState('idea')
+    setPromoteStatus('')
+    setPromoteOpen(true)
+  }
+
+  async function handlePromoteSubmit() {
+    if (!conversation || !promoteTitle.trim() || promoteSaving) return
+    setPromoteSaving(true)
+    try {
+      await window.api.promoteConversationToTask(conversation.id, {
+        title: promoteTitle,
+        brief: promoteBrief,
+        state: promoteState,
+      })
+      setPromoteStatus('Task created.')
+      setPromoteOpen(false)
+    } catch (err) {
+      setPromoteStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPromoteSaving(false)
     }
   }
 
@@ -356,18 +483,69 @@ export function ChatPane() {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {readOnly && conversation && (
-        <div style={{
-          padding: '10px 16px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
-          background: 'rgba(255,255,255,0.04)',
-          color: 'rgba(255,255,255,0.62)',
-          fontSize: 12,
-        }}>
-          Imported from {conversation.source}. This transcript is read-only history.
+        <div className="chat-import-banner">
+          <div className="chat-import-banner__copy">
+            <strong>{conversation.source === 'codex' ? 'Imported from Codex.' : `Imported from ${conversation.source}.`}</strong>
+            <span>
+              {conversation.source === 'codex'
+                ? 'Relay refreshes this transcript from local Codex history; it remains read-only here.'
+                : 'This transcript is read-only history.'}
+            </span>
+            {conversation.source === 'codex' && conversation.externalLink?.terminalName && (
+              <span className="chat-import-banner__linkage">
+                Linked to Relay terminal <strong>{conversation.externalLink.terminalName}</strong>
+                {conversation.externalLink.taskTitle ? ` for task "${conversation.externalLink.taskTitle}"` : ''}.
+              </span>
+            )}
+          </div>
+          {conversation.source === 'codex' && conversation.externalLink?.terminalSessionId && (
+            <button type="button" className="chat-import-banner__action" onClick={onOpenTerminals}>
+              Open terminal
+            </button>
+          )}
         </div>
       )}
 
-      <div style={{
+      {!readOnly && conversation && (
+        <MemoryPanel
+          memory={conversation.memory ?? {}}
+          onSave={handleMemorySave}
+          onCompact={handleCompact}
+          onPromoteToTask={openPromotion}
+        />
+      )}
+
+      {readOnly && conversation && (
+        <div className="chat-task-strip">
+          <button type="button" onClick={openPromotion}>Promote to task</button>
+          {promoteStatus && <span>{promoteStatus}</span>}
+        </div>
+      )}
+
+      {!readOnly && promoteStatus && (
+        <div className="chat-task-strip chat-task-strip--status">
+          <span>{promoteStatus}</span>
+        </div>
+      )}
+
+      {promoteOpen && (
+        <PromoteTaskModal
+          title={promoteTitle}
+          brief={promoteBrief}
+          state={promoteState}
+          saving={promoteSaving}
+          onTitleChange={setPromoteTitle}
+          onBriefChange={setPromoteBrief}
+          onStateChange={setPromoteState}
+          onCancel={() => setPromoteOpen(false)}
+          onSubmit={() => void handlePromoteSubmit()}
+        />
+      )}
+
+      <div
+        ref={messagesRef}
+        onScroll={handleMessagesScroll}
+        style={{
         flex: 1,
         overflowY: 'auto',
         padding: '24px 24px 8px',
@@ -425,6 +603,28 @@ export function ChatPane() {
         {conversation.messages.map(msg => (
           <MessageBubble key={msg.id} message={msg} />
         ))}
+        {!autoFollow && conversation.messages.length > 0 && (
+          <div style={{ position: 'sticky', bottom: 14, display: 'flex', justifyContent: 'flex-end', pointerEvents: 'none' }}>
+            <button
+              type="button"
+              onClick={jumpToLatest}
+              style={{
+                pointerEvents: 'auto',
+                border: '1px solid rgba(90,180,255,0.34)',
+                background: 'rgba(12,18,30,0.88)',
+                color: 'rgba(191,219,254,0.95)',
+                borderRadius: 999,
+                padding: '7px 12px',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 6px 22px rgba(0,0,0,0.35)',
+              }}
+            >
+              Jump to latest
+            </button>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -437,6 +637,8 @@ export function ChatPane() {
           onCodexModelChange={handleCodexModelChange}
           geminiModel={geminiModel}
           onGeminiModelChange={handleGeminiModelChange}
+          deepSeekModel={deepSeekModel}
+          onDeepSeekModelChange={handleDeepSeekModelChange}
           ollamaModel={ollamaModel}
           ollamaModels={ollamaModels}
           onOllamaModelChange={handleOllamaModelChange}

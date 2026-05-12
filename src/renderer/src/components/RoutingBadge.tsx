@@ -9,6 +9,8 @@ const MODEL_COLOR: Record<string, string> = {
   'Gemini Pro':     '#34d399',
   'Gemini Flash':   '#2dd4bf',
   'Gemini Flash-Lite': '#5eead4',
+  'DeepSeek Flash': '#7dd3fc',
+  'DeepSeek Pro': '#38bdf8',
   'Cursor Auto': '#f472b6',
   'Cursor Composer': '#f472b6',
 }
