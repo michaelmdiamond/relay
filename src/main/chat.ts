@@ -4,12 +4,14 @@ import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { randomUUID } from 'crypto'
-import type { ChatMessage, ChatMode, ContextAttachment, ContextPacket, Conversation, ConversationMemory, ModelChoice, RequestDiagnostics, SendMessageOptions, TokenUsage } from '../shared/types'
+import type { ChatMessage, ChatMode, ContextAttachment, ContextPacket, Conversation, ConversationMemory, ExternalConversationLink, ModelChoice, RequestDiagnostics, SendMessageOptions, TerminalSessionSnapshot, TaskItem, TokenUsage } from '../shared/types'
 import { route } from './router'
 import { isOpenAIConnected } from './openai-auth'
 import { getCodexModel, streamCodexMessage } from './openai-codex'
 import { isGeminiConnected, getGeminiModel } from './gemini-auth'
 import { streamGeminiMessage } from './gemini'
+import { getDeepSeekModel, isDeepSeekConnected } from './deepseek-auth'
+import { streamDeepSeekMessage } from './deepseek'
 import { isOllamaConfigured, getOllamaConfig } from './ollama-config'
 import { streamOllamaMessage } from './ollama'
 import { getCursorModel, isCursorConnected } from './cursor-auth'
@@ -476,6 +478,29 @@ function readCodexThreadRows(): CodexThreadRow[] {
   }
 }
 
+export function getCodexConversationRevision(): string {
+  return readCodexThreadRows()
+    .map((row) => {
+      let rolloutRevision = ''
+      try {
+        const stat = row.rollout_path ? fs.statSync(row.rollout_path) : null
+        rolloutRevision = stat ? `${stat.size}:${stat.mtimeMs}` : ''
+      } catch {
+        rolloutRevision = ''
+      }
+
+      return [
+        row.id,
+        row.title,
+        row.cwd,
+        row.updated_at,
+        row.rollout_path,
+        rolloutRevision,
+      ].join('|')
+    })
+    .join('\n')
+}
+
 function extractCodexText(content: unknown): string {
   if (!Array.isArray(content)) return ''
   return content
@@ -576,8 +601,60 @@ function importCodexConversations(): Conversation[] {
     .filter((conv): conv is Conversation => !!conv)
 }
 
-function getExternalConversations(): Conversation[] {
-  return [...importClaudeConversations(), ...importCodexConversations()]
+function withinMatchingWindow(left?: string, right?: string, minutes = 30): boolean {
+  if (!left || !right) return false
+  const leftTime = new Date(left).getTime()
+  const rightTime = new Date(right).getTime()
+  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) return false
+  return Math.abs(leftTime - rightTime) <= minutes * 60 * 1000
+}
+
+function codexExternalLink(
+  conversation: Conversation,
+  terminals: TerminalSessionSnapshot[],
+  tasks: TaskItem[]
+): ExternalConversationLink | undefined {
+  const candidates = terminals
+    .filter((terminal) => terminal.launcherId === 'codex')
+    .filter((terminal) => !conversation.projectPath || !terminal.cwd || terminal.cwd === conversation.projectPath)
+    .filter((terminal) => withinMatchingWindow(conversation.updatedAt ?? conversation.createdAt, terminal.lastActivityAt, 90))
+    .sort((a, b) => (b.lastActivityAt ?? '').localeCompare(a.lastActivityAt ?? ''))
+
+  const terminal = candidates[0]
+  if (!terminal) return undefined
+
+  const task = terminal.taskId
+    ? tasks.find((entry) => entry.id === terminal.taskId)
+    : undefined
+
+  return {
+    terminalSessionId: terminal.id,
+    terminalName: terminal.name,
+    terminalStatus: terminal.status,
+    terminalLastActivityAt: terminal.lastActivityAt,
+    taskId: task?.id,
+    taskTitle: task?.title,
+  }
+}
+
+function linkCodexConversations(
+  conversations: Conversation[],
+  terminals: TerminalSessionSnapshot[],
+  tasks: TaskItem[]
+): Conversation[] {
+  if (!terminals.length) return conversations
+  return conversations.map((conversation) => {
+    if (conversation.source !== 'codex') return conversation
+    const externalLink = codexExternalLink(conversation, terminals, tasks)
+    return externalLink ? { ...conversation, externalLink } : conversation
+  })
+}
+
+function getExternalConversations(terminals: TerminalSessionSnapshot[] = [], tasks: TaskItem[] = []): Conversation[] {
+  return [
+    ...importClaudeConversations(),
+    ...linkCodexConversations(importCodexConversations(), terminals, tasks),
+  ]
 }
 
 function sortConversations(conversations: Conversation[]): Conversation[] {
@@ -602,8 +679,8 @@ export function saveApiKey(key: string): void {
   writeConfig({ ...readConfig(), apiKey: key })
 }
 
-export function getConversations(): Conversation[] {
-  return sortConversations([...readStore(), ...getExternalConversations()])
+export function getConversations(terminals: TerminalSessionSnapshot[] = [], tasks: TaskItem[] = []): Conversation[] {
+  return sortConversations([...readStore(), ...getExternalConversations(terminals, tasks)])
 }
 
 export function newConversation(): Conversation {
@@ -713,12 +790,14 @@ export async function sendMessage(
   // Route — pass connection state for all free providers
   const { connected: openAIConnected } = isOpenAIConnected()
   const { configured: geminiConnected } = isGeminiConnected()
+  const { configured: deepSeekConnected } = isDeepSeekConnected()
   const codexModel = getCodexModel()
   const geminiModel = getGeminiModel()
+  const deepSeekModel = getDeepSeekModel()
   const ollamaConfigured = isOllamaConfigured()
   const ollamaModel = getOllamaConfig()?.model ?? ''
   const { configured: cursorConfigured } = isCursorConnected()
-  const routing = route(conv.messages, modelChoice, openAIConnected, geminiConnected, codexModel, geminiModel, ollamaConfigured, ollamaModel, cursorConfigured, getCursorModel())
+  const routing = route(conv.messages, modelChoice, openAIConnected, geminiConnected, codexModel, geminiModel, deepSeekConnected, deepSeekModel, ollamaConfigured, ollamaModel, cursorConfigured, getCursorModel())
 
   // If routing to Anthropic but no key configured, bail early with a clear message
   if (routing.provider === 'anthropic' && !isApiKeyConfigured()) {
@@ -873,6 +952,34 @@ export async function sendMessage(
         emit.error(conversationId, assistantId, msg)
       },
     }, signal, routing.model as import('../shared/types').GeminiModel, systemContext)
+    if (signal.aborted) {
+      if (accumulated) finalizePartial(accumulated)
+      else cancelPlaceholder()
+    }
+    return
+  }
+
+  if (routing.provider === 'deepseek') {
+    let accumulated = ''
+    await streamDeepSeekMessage(optimizedHistoryMessages, {
+      chunk: (text) => {
+        if (signal.aborted) return
+        accumulated += text
+        emit.chunk(conversationId, assistantId, text)
+      },
+      done: (fullText, usage) => {
+        finalizePartial(fullText, usage)
+      },
+      error: (msg) => {
+        if (signal.aborted) return
+        updateConversation(conversationId, c => ({
+          ...c,
+          updatedAt: new Date().toISOString(),
+          messages: c.messages.filter(m => m.id !== assistantId),
+        }))
+        emit.error(conversationId, assistantId, msg)
+      },
+    }, signal, routing.model as import('../shared/types').DeepSeekModel, systemContext)
     if (signal.aborted) {
       if (accumulated) finalizePartial(accumulated)
       else cancelPlaceholder()

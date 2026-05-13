@@ -1,0 +1,150 @@
+{
+  "/Users/michael/Documents/GitHub/relay/vite.config.ts": {
+    "mtime": 1777496893.163562,
+    "hash": "e4a9949298033786266d65712ada8e6a"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/App.tsx": {
+    "mtime": 1777770461.0850997,
+    "hash": "838a122938e0526d21a9f19e19918b46"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/main.tsx": {
+    "mtime": 1777496893.1627457,
+    "hash": "3dabf858675ddfd21228f995fb9f9e3e"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/ConnectionsDashboard.tsx": {
+    "mtime": 1777930703.7089207,
+    "hash": "c5c9ca20e707322233129f8f49fdf814"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/RoutingBadge.tsx": {
+    "mtime": 1777663662.9260983,
+    "hash": "bc4ac5c401f6912cef57bf8f8574fc4f"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/WorkflowsPane.tsx": {
+    "mtime": 1777663662.926554,
+    "hash": "73760d0d3d7f0423b7ee279f0cd3cb76"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/InputBar.tsx": {
+    "mtime": 1777773433.0021434,
+    "hash": "b26126f548b436c248843dc18a7dd96f"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/UsageDashboard.tsx": {
+    "mtime": 1777768376.8689628,
+    "hash": "b071e183f46b24b0881c65fc320e3724"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/ChatPane.tsx": {
+    "mtime": 1777773433.0017998,
+    "hash": "862f908a7c93e5b1028dd92c586f78ef"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/ModelSelector.tsx": {
+    "mtime": 1777773433.0023255,
+    "hash": "1d8caab1b82a30bda6bd681f454a7c21"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/MessageBubble.tsx": {
+    "mtime": 1777663662.9258606,
+    "hash": "c7951aa7319dcfbb8870cda2a97dbc44"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/Sidebar.tsx": {
+    "mtime": 1777663894.3613245,
+    "hash": "bdb4c296f99effe2faf0b4b5638fb34c"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/TerminalsPane.tsx": {
+    "mtime": 1777930703.70921,
+    "hash": "d8a1ee4266a39754a64328dc83777050"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/ApiKeySetup.tsx": {
+    "mtime": 1777930703.7086332,
+    "hash": "690faddb9a38503ffa660cc2c97b1914"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/store/chat.ts": {
+    "mtime": 1777663662.9266596,
+    "hash": "b0ad7a6f03d7a98cac90351cf73c7b59"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/shared/types.ts": {
+    "mtime": 1777930703.709863,
+    "hash": "736cc8a361079c050840f5ea4d04ddf3"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/ollama.ts": {
+    "mtime": 1777663662.924536,
+    "hash": "f4e1a32cc668d67d60d2813f1d1ffd9c"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/cursor-auth.ts": {
+    "mtime": 1777771331.553483,
+    "hash": "959d0f0fa74eff3a781cca84ecba2a8f"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/private-json.ts": {
+    "mtime": 1777771331.5522826,
+    "hash": "e3d1fdc7358846bfd2b890a5dddb40d3"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/gemini-auth.ts": {
+    "mtime": 1777771331.5533245,
+    "hash": "1f666a2fcc1c655210cf1bc1091e1a0d"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/router.ts": {
+    "mtime": 1777773433.0012648,
+    "hash": "5477537e1fe8c0140b92f70650b66690"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/workflows.ts": {
+    "mtime": 1777773433.00143,
+    "hash": "63379ed0cac283ea5dc9b12c376b7c7e"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/openai-auth.ts": {
+    "mtime": 1777771331.5524626,
+    "hash": "1ba605803c1d44cd9cb12485c6dd1301"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/openai-codex.ts": {
+    "mtime": 1777773433.001117,
+    "hash": "2440e9b8dd6429ed6c00ea6b3b046881"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/chat.ts": {
+    "mtime": 1777773433.0006638,
+    "hash": "5caddadf5d2860124a594a2aa34d21ac"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/system-prompt.ts": {
+    "mtime": 1777663662.924836,
+    "hash": "5ee28175c3c114f81e939260cd4a0ee8"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/ollama-config.ts": {
+    "mtime": 1777771331.553724,
+    "hash": "995b9bd187882533f0398953f6e943a7"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/gemini.ts": {
+    "mtime": 1777663662.9241788,
+    "hash": "30b8bdfe7aa922f31352e05d51b4efc6"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/usage-limits.ts": {
+    "mtime": 1777771331.5541139,
+    "hash": "d7aeebc53d73a77597f66d1685e0a7f6"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/index.ts": {
+    "mtime": 1777930703.7076802,
+    "hash": "2a8cd8f584900cfc2a37020563f243bc"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/skills.ts": {
+    "mtime": 1777665380.8067577,
+    "hash": "043ed698403ff04d01e8f5c8e5045082"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/connectors.ts": {
+    "mtime": 1777663662.9238315,
+    "hash": "a871e2c2bdd59b904a1a2c3a86be9253"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/cursor-agent.ts": {
+    "mtime": 1777663662.9239466,
+    "hash": "bbbcd1e3b9a008276941f48be39789f7"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/ollama-process.ts": {
+    "mtime": 1777930703.7079716,
+    "hash": "2885c7baa95af168c5da6df9a339a0e4"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/preload/index.ts": {
+    "mtime": 1777930703.708307,
+    "hash": "d06cd92516a3ed7ebc449c0b84ab6a95"
+  },
+  "/Users/michael/Documents/GitHub/relay/README.md": {
+    "mtime": 1777930703.7073522,
+    "hash": "02075728cff14db6171a754990c2d3c5"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/index.html": {
+    "mtime": 1777496893.1616478,
+    "hash": "d4c476aa135a258119dee5c9d4725fad"
+  }
+}

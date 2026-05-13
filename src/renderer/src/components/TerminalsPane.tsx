@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -44,6 +44,15 @@ const launchers: Launcher[] = [
     sessionLabel: 'Gemini Session',
   },
   {
+    id: 'deepseek',
+    name: 'DeepSeek Agent',
+    status: 'local',
+    headline: 'Launch a local DeepSeek agent session',
+    detail: 'Use this when you want the installed DeepSeek TUI working directly in the selected project folder.',
+    cta: 'New DeepSeek session',
+    sessionLabel: 'DeepSeek Session',
+  },
+  {
     id: 'cursor',
     name: 'Cursor Agent',
     status: 'cursor',
@@ -72,12 +81,27 @@ const launchers: Launcher[] = [
   },
 ]
 
-interface TerminalViewProps {
-  session: TerminalSessionSnapshot
-  active: boolean
+function dedupeSessions(sessions: TerminalSessionSnapshot[]) {
+  const seen = new Set<string>()
+  return sessions.filter((session) => {
+    if (seen.has(session.id)) return false
+    seen.add(session.id)
+    return true
+  })
 }
 
-function TerminalView({ session, active }: TerminalViewProps) {
+function upsertSession(sessions: TerminalSessionSnapshot[], session: TerminalSessionSnapshot) {
+  return [session, ...sessions.filter((entry) => entry.id !== session.id)]
+}
+
+interface TerminalViewProps {
+  session: TerminalSessionSnapshot
+  visible: boolean
+  focused: boolean
+  onFocus: () => void
+}
+
+function TerminalView({ session, visible, focused, onFocus }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -163,7 +187,7 @@ function TerminalView({ session, active }: TerminalViewProps) {
   }
 
   useEffect(() => {
-    if (!containerRef.current) return
+    if (!visible || !containerRef.current) return
 
     const term = new Terminal({
       fontFamily: '"Cascadia Code", "Fira Code", "Menlo", monospace',
@@ -171,7 +195,7 @@ function TerminalView({ session, active }: TerminalViewProps) {
       lineHeight: 1.4,
       cursorBlink: true,
       theme: {
-        background: session.launcherId === 'gemini' ? '#070711' : '#050507',
+        background: session.launcherId === 'gemini' || session.launcherId === 'deepseek' ? '#070711' : '#050507',
         foreground: '#e2e8f0',
         cursor: '#e2e8f0',
         selectionBackground: '#4a5568',
@@ -226,6 +250,7 @@ function TerminalView({ session, active }: TerminalViewProps) {
       .then(() => window.terminalApi.getTerminalBuffer(session.id))
       .then((buffer) => {
         if (disposed) return
+        term.reset()
         bufferSequence = buffer.sequence
         if (buffer.output) term.write(buffer.output)
         bufferReplayed = true
@@ -285,10 +310,10 @@ function TerminalView({ session, active }: TerminalViewProps) {
       ro.disconnect()
       term.dispose()
     }
-  }, [session.id, session.launcherId, session.name, session.cwd])
+  }, [visible, session.id, session.launcherId, session.name, session.cwd])
 
   useEffect(() => {
-    if (active) {
+    if (visible) {
       requestAnimationFrame(() => {
         const term = termRef.current
         fitAddonRef.current?.fit()
@@ -300,17 +325,20 @@ function TerminalView({ session, active }: TerminalViewProps) {
             window.terminalApi.resizeTerminal(session.id, cols, rows)
           }
         }
-        if (editorMode) editorRef.current?.focus()
-        else termRef.current?.focus()
+        if (focused) {
+          if (editorMode) editorRef.current?.focus()
+          else termRef.current?.focus()
+        }
       })
     }
-  }, [active, editorMode])
+  }, [focused, visible, editorMode])
 
   return (
     <div
-      className={`terminal-session-wrapper${session.launcherId === 'gemini' ? ' terminal-session-wrapper--opaque' : ''}`}
-      style={{ display: active ? 'flex' : 'none' }}
+      className={`terminal-session-wrapper${session.launcherId === 'gemini' || session.launcherId === 'deepseek' ? ' terminal-session-wrapper--opaque' : ''}`}
+      style={{ display: visible ? 'flex' : 'none' }}
       onClick={() => {
+        onFocus()
         if (editorMode) editorRef.current?.focus()
         else termRef.current?.focus()
       }}
@@ -392,29 +420,46 @@ function TerminalView({ session, active }: TerminalViewProps) {
   )
 }
 
-export function TerminalsPane() {
+export function TerminalsPane({ visible = true }: { visible?: boolean }) {
   const [selectedId, setSelectedId] = useState<TerminalLauncherId>('codex')
   const [sessions, setSessions] = useState<TerminalSessionSnapshot[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [visibleSessionIds, setVisibleSessionIds] = useState<Set<string>>(new Set())
   const [cwd, setCwd] = useState<string | null>(null)
+  const [launchError, setLaunchError] = useState('')
 
   const selectedLauncher = useMemo(
     () => launchers.find((l) => l.id === selectedId) ?? launchers[0],
     [selectedId],
   )
+  const uniqueSessions = useMemo(() => dedupeSessions(sessions), [sessions])
 
   useEffect(() => {
     let canceled = false
     window.terminalApi.listTerminalSessions().then((existingSessions) => {
       if (canceled) return
-      setSessions(existingSessions)
+      const nextSessions = dedupeSessions(existingSessions)
+      setSessions(nextSessions)
       setActiveSessionId((current) => {
-        if (current && existingSessions.some((session) => session.id === current)) return current
-        return existingSessions[0]?.id ?? null
+        if (current && nextSessions.some((session) => session.id === current)) return current
+        return nextSessions[0]?.id ?? null
       })
+      setVisibleSessionIds((current) => {
+        const existingIds = new Set(nextSessions.map((session) => session.id))
+        const next = new Set([...current].filter((id) => existingIds.has(id)))
+        if (next.size === 0 && nextSessions[0]) next.add(nextSessions[0].id)
+        return next
+      })
+    })
+    const unsubscribeCreated = window.terminalApi.onTerminalCreated((session) => {
+      if (canceled) return
+      setSessions((current) => upsertSession(current, session))
+      setActiveSessionId(session.id)
+      setVisibleSessionIds((current) => new Set([...current, session.id]))
     })
     return () => {
       canceled = true
+      unsubscribeCreated()
     }
   }, [])
 
@@ -424,15 +469,21 @@ export function TerminalsPane() {
   }
 
   async function handleLaunchSession() {
-    const nextIndex = sessions.filter((s) => s.launcherId === selectedLauncher.id).length + 1
-    const session = await window.terminalApi.createTerminal(
-      `${selectedLauncher.id}-${crypto.randomUUID()}`,
-      selectedLauncher.id,
-      `${selectedLauncher.sessionLabel} ${nextIndex}`,
-      cwd ?? undefined,
-    )
-    setSessions((current) => [session, ...current])
-    setActiveSessionId(session.id)
+    setLaunchError('')
+    const nextIndex = uniqueSessions.filter((s) => s.launcherId === selectedLauncher.id).length + 1
+    try {
+      const session = await window.terminalApi.createTerminal(
+        `${selectedLauncher.id}-${crypto.randomUUID()}`,
+        selectedLauncher.id,
+        `${selectedLauncher.sessionLabel} ${nextIndex}`,
+        cwd ?? undefined,
+      )
+      setSessions((current) => upsertSession(current, session))
+      setActiveSessionId(session.id)
+      setVisibleSessionIds((current) => new Set([...current, session.id]))
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : String(error))
+    }
   }
 
   function handleCloseSession(sessionId: string) {
@@ -443,61 +494,46 @@ export function TerminalsPane() {
         if (activeId !== sessionId) return activeId
         return nextSessions[0]?.id ?? null
       })
+      setVisibleSessionIds((current) => {
+        const next = new Set([...current].filter((id) => id !== sessionId))
+        if (next.size === 0 && nextSessions[0]) next.add(nextSessions[0].id)
+        return next
+      })
       return nextSessions
     })
   }
 
+  function handleSelectSession(sessionId: string) {
+    setVisibleSessionIds((current) => new Set([...current, sessionId]))
+  }
+
+  function handleSoloSession() {
+    const targetSessionId = activeSessionId && uniqueSessions.some((session) => session.id === activeSessionId)
+      ? activeSessionId
+      : visibleSessions[0]?.id
+    if (!targetSessionId) return
+    setVisibleSessionIds(new Set([targetSessionId]))
+  }
+
+  function handleTileAll() {
+    setVisibleSessionIds(new Set(uniqueSessions.map((session) => session.id)))
+  }
+
+  function handleHideSession(sessionId: string, event: MouseEvent) {
+    event.stopPropagation()
+    setVisibleSessionIds((current) => {
+      if (current.size <= 1) return current
+      const next = new Set(current)
+      next.delete(sessionId)
+      return next
+    })
+  }
+
+  const visibleSessions = uniqueSessions.filter((session) => visibleSessionIds.has(session.id))
+
   return (
     <div className="terminals-view">
       <aside className="terminals-sidebar">
-        <div className="terminals-sidebar__header">
-          <div className="terminals-sidebar__title">Live Sessions</div>
-        </div>
-
-        {sessions.map((session) => (
-          <button
-            key={session.id}
-            type="button"
-            className={`terminal-tab ${session.id === activeSessionId ? 'active' : ''}`}
-            onClick={() => setActiveSessionId(session.id)}
-          >
-            <span className="tab-name">
-              {session.name}
-              {session.cwd && (
-                <span style={{ display: 'block', fontSize: 10, opacity: 0.45, fontWeight: 400, marginTop: 1 }}>
-                  {session.cwd.split('/').at(-1)}
-                </span>
-              )}
-            </span>
-            <span
-              role="button"
-              aria-label={`Close ${session.name}`}
-              className="terminal-tab__close"
-              tabIndex={0}
-              onClick={(event) => {
-                event.stopPropagation()
-                handleCloseSession(session.id)
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return
-                event.preventDefault()
-                event.stopPropagation()
-                handleCloseSession(session.id)
-              }}
-            >
-              ×
-            </span>
-          </button>
-        ))}
-
-        {sessions.length === 0 && (
-          <div className="terminals-empty">
-            Start a session from the right-hand panel.
-          </div>
-        )}
-
-        <div className="terminals-sidebar__divider" />
-
         <div className="terminals-sidebar__header">
           <div className="terminals-sidebar__title">Launchers</div>
         </div>
@@ -516,11 +552,73 @@ export function TerminalsPane() {
       </aside>
 
       <section className="terminals-body">
-        {sessions.map((session) => (
-          <TerminalView key={session.id} session={session} active={session.id === activeSessionId} />
-        ))}
+        <div className="terminal-tabs-bar">
+          <div className="terminal-session-tabs">
+            {uniqueSessions.map((session) => {
+              const isVisible = visibleSessionIds.has(session.id)
+              return (
+                <button
+                  key={session.id}
+                  type="button"
+                  className={`terminal-session-tab${isVisible ? ' active is-visible' : ''}${session.id === activeSessionId ? ' is-focused' : ''}`}
+                  onClick={() => handleSelectSession(session.id)}
+                  title={session.cwd ? `${session.name} - ${session.cwd}` : session.name}
+                >
+                  <span
+                    className="terminal-session-tab__visibility"
+                    title={isVisible ? 'Hide from workspace' : 'Show in workspace'}
+                    onClick={(event) => {
+                      if (isVisible) handleHideSession(session.id, event)
+                    }}
+                  />
+                  <span className="terminal-session-tab__label">
+                    <span className="terminal-session-tab__name">{session.name}</span>
+                    {session.cwd && <span className="terminal-session-tab__cwd">{session.cwd.split('/').at(-1)}</span>}
+                  </span>
+                  <span
+                    className="terminal-session-tab__close"
+                    title={`Close ${session.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      handleCloseSession(session.id)
+                    }}
+                  >
+                    ×
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <div className="terminal-tabs-actions">
+            <button type="button" onClick={handleSoloSession} disabled={visibleSessions.length <= 1}>Solo</button>
+            <button type="button" onClick={handleTileAll} disabled={uniqueSessions.length <= 1 || visibleSessionIds.size === uniqueSessions.length}>Tile all</button>
+            <button type="button" onClick={handlePickDirectory}>{cwd ? cwd.split('/').at(-1) : 'Folder'}</button>
+            <button type="button" onClick={handleLaunchSession}>+ {selectedLauncher.name}</button>
+            {cwd && <button type="button" onClick={() => setCwd(null)}>Clear</button>}
+          </div>
+        </div>
 
-        {!activeSessionId && (
+        {launchError && (
+          <div className="terminal-launch-error">
+            {launchError}
+          </div>
+        )}
+
+        {visibleSessions.length > 0 && (
+          <div className={`terminal-grid terminal-grid--${Math.min(visibleSessions.length, 4)}`}>
+            {visibleSessions.map((session) => (
+              <TerminalView
+                key={session.id}
+                session={session}
+                visible={visible}
+                focused={session.id === activeSessionId}
+                onFocus={() => setActiveSessionId(session.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        {uniqueSessions.length === 0 && (
           <div className="terminal-pane">
             <div className="terminal-launch-card">
               <div className="terminal-launch-card__eyebrow">Terminal Sessions</div>
@@ -530,37 +628,26 @@ export function TerminalsPane() {
                 <button type="button" className="terminal-launch-btn" onClick={handleLaunchSession}>
                   {selectedLauncher.cta}
                 </button>
-                <button type="button" className="terminal-launch-btn" onClick={handlePickDirectory} style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
-                  {cwd ? `📁 ${cwd.split('/').at(-1)}` : '📁 Choose folder'}
+                <button type="button" className="terminal-launch-btn terminal-launch-btn--secondary" onClick={handlePickDirectory}>
+                  {cwd ? `${cwd.split('/').at(-1)}` : 'Choose folder'}
                 </button>
                 {cwd && (
-                  <button type="button" onClick={() => setCwd(null)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: 13, cursor: 'pointer' }}>
+                  <button type="button" className="terminal-launch-btn terminal-launch-btn--clear" onClick={() => setCwd(null)} aria-label="Clear selected folder" title="Clear selected folder">
                     ×
                   </button>
                 )}
               </div>
               {cwd && (
-                <p className="terminal-launch-card__hint" style={{ marginTop: 8 }}>
+                <p className="terminal-launch-card__hint">
                   Starting in: {cwd}
                 </p>
               )}
+              {launchError && (
+                <p className="terminal-launch-card__hint terminal-launch-card__hint--error">
+                  {launchError}
+                </p>
+              )}
             </div>
-          </div>
-        )}
-
-        {activeSessionId && (
-          <div className="terminal-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button type="button" className="terminal-launch-btn terminal-launch-btn--sm" onClick={handleLaunchSession}>
-              + {selectedLauncher.cta}
-            </button>
-            <button type="button" className="terminal-launch-btn terminal-launch-btn--sm" onClick={handlePickDirectory} style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
-              {cwd ? `📁 ${cwd.split('/').at(-1)}` : '📁 folder'}
-            </button>
-            {cwd && (
-              <button type="button" onClick={() => setCwd(null)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: 13, cursor: 'pointer' }}>
-                ×
-              </button>
-            )}
           </div>
         )}
       </section>

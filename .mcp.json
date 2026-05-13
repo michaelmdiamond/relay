@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "CodeGraphContext": {
+      "command": "/Users/michael/.local/bin/cgc",
+      "args": ["mcp", "start"],
+      "env": {
+        "DEFAULT_DATABASE": "kuzudb"
+      }
+    }
+  }
+}

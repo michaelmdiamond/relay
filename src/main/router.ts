@@ -1,4 +1,4 @@
-import type { AnyModel, ChatMessage, GeminiModel, ModelChoice, Provider, RoutingDecision } from '../shared/types'
+import type { AnyModel, ChatMessage, DeepSeekModel, GeminiModel, ModelChoice, Provider, RoutingDecision } from '../shared/types'
 
 const MODEL_LABELS: Partial<Record<string, string>> = {
   'claude-haiku-4-5-20251001': 'Haiku',
@@ -13,6 +13,8 @@ const MODEL_LABELS: Partial<Record<string, string>> = {
   'gemini-2.5-pro': 'Gemini Pro',
   'gemini-2.5-flash': 'Gemini Flash',
   'gemini-2.5-flash-lite': 'Gemini Flash-Lite',
+  'deepseek-v4-flash': 'DeepSeek Flash',
+  'deepseek-v4-pro': 'DeepSeek Pro',
 }
 
 const MODEL_PROVIDER: Partial<Record<string, Provider>> = {
@@ -28,9 +30,11 @@ const MODEL_PROVIDER: Partial<Record<string, Provider>> = {
   'gemini-2.5-pro': 'google',
   'gemini-2.5-flash': 'google',
   'gemini-2.5-flash-lite': 'google',
+  'deepseek-v4-flash': 'deepseek',
+  'deepseek-v4-pro': 'deepseek',
 }
 
-const ANTHROPIC_FOR_CHOICE: Record<Exclude<ModelChoice, 'auto' | 'codex' | 'gemini' | 'ollama' | 'cursor'>, AnyModel> = {
+const ANTHROPIC_FOR_CHOICE: Record<Exclude<ModelChoice, 'auto' | 'codex' | 'gemini' | 'deepseek' | 'ollama' | 'cursor'>, AnyModel> = {
   haiku: 'claude-haiku-4-5-20251001',
   sonnet: 'claude-sonnet-4-6',
   opus: 'claude-opus-4-7',
@@ -84,6 +88,8 @@ export function route(
   geminiConnected: boolean,
   codexModel: string = 'gpt-5.5',
   geminiModel: GeminiModel = 'gemini-2.5-flash',
+  deepSeekConnected: boolean = false,
+  deepSeekModel: DeepSeekModel = 'deepseek-v4-flash',
   ollamaConfigured: boolean = false,
   ollamaModel: string = '',
   cursorConfigured: boolean = false,
@@ -120,9 +126,17 @@ export function route(
     return decide(geminiModel, 'manually selected', false)
   }
 
+  // Manual DeepSeek selection
+  if (choice === 'deepseek') {
+    if (!deepSeekConnected) {
+      return decide('claude-sonnet-4-6', 'DeepSeek selected but not connected - using Sonnet', false)
+    }
+    return decide(deepSeekModel, 'manually selected', false, 'deepseek')
+  }
+
   // Other manual selections
   if (choice !== 'auto') {
-    const model = ANTHROPIC_FOR_CHOICE[choice as Exclude<ModelChoice, 'auto' | 'codex' | 'gemini' | 'ollama' | 'cursor'>]
+    const model = ANTHROPIC_FOR_CHOICE[choice as Exclude<ModelChoice, 'auto' | 'codex' | 'gemini' | 'deepseek' | 'ollama' | 'cursor'>]
     return decide(model, 'manually selected', false)
   }
 
@@ -141,7 +155,7 @@ export function route(
   }
 
   // When free providers are connected, prefer them over Anthropic credits.
-  if (openAIConnected || geminiConnected) {
+  if (openAIConnected || geminiConnected || deepSeekConnected) {
     if (priorTokens > 8000) {
       return decide('claude-opus-4-7', 'large context — using Opus', true)
     }
@@ -150,6 +164,9 @@ export function route(
     }
     if (geminiConnected) {
       return decide(geminiModel, isComplex ? 'complex task' : 'default', true)
+    }
+    if (deepSeekConnected) {
+      return decide(deepSeekModel, isComplex ? 'complex task' : 'default', true, 'deepseek')
     }
     return decide(codexModel, hasCode ? 'code task' : 'default', true, 'openai')
   }

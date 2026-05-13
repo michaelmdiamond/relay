@@ -30,8 +30,12 @@
   "build": {
     "appId": "dev.relay.app",
     "productName": "Relay",
+    "directories": {
+      "buildResources": "build"
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
+      "icon": "icon/icon.icns",
       "target": "dir"
     },
     "files": [

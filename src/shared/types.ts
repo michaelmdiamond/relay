@@ -1,4 +1,4 @@
-export type ModelChoice = 'auto' | 'haiku' | 'sonnet' | 'opus' | 'codex' | 'gemini' | 'ollama' | 'cursor'
+export type ModelChoice = 'auto' | 'haiku' | 'sonnet' | 'opus' | 'codex' | 'gemini' | 'deepseek' | 'ollama' | 'cursor'
 
 export type AnthropicModel =
   | 'claude-haiku-4-5-20251001'
@@ -21,10 +21,14 @@ export type GeminiModel =
   | 'gemini-2.5-flash'
   | 'gemini-2.5-flash-lite'
 
-export type AnyModel = AnthropicModel | CodexModel | GeminiModel
+export type DeepSeekModel =
+  | 'deepseek-v4-flash'
+  | 'deepseek-v4-pro'
 
-export type Provider = 'anthropic' | 'openai' | 'google' | 'ollama' | 'cursor'
-export type ConnectorProvider = 'claude' | 'codex' | 'gemini' | 'cursor'
+export type AnyModel = AnthropicModel | CodexModel | GeminiModel | DeepSeekModel
+
+export type Provider = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'ollama' | 'cursor'
+export type ConnectorProvider = 'claude' | 'codex' | 'gemini' | 'deepseek' | 'cursor'
 export type ConnectorStatus = 'connected' | 'configured' | 'installed'
 
 export interface RoutingDecision {
@@ -133,6 +137,7 @@ export interface UsageLimitSettings {
   anthropicMonthlyTokens?: number
   openaiMonthlyTokens?: number
   googleMonthlyTokens?: number
+  deepseekMonthlyTokens?: number
   ollamaMonthlyTokens?: number
 }
 
@@ -197,20 +202,87 @@ export interface Conversation {
   readOnly?: boolean
   mode?: ChatMode
   memory?: ConversationMemory
+  externalLink?: ExternalConversationLink
 }
 
-export type TerminalLauncherId = 'codex' | 'claude' | 'gemini' | 'cursor' | 'local' | 'shell'
+export type TerminalLauncherId = 'codex' | 'claude' | 'gemini' | 'deepseek' | 'cursor' | 'local' | 'shell'
+export type TerminalSessionStatus = 'running' | 'exited'
+
+export interface ExternalConversationLink {
+  terminalSessionId?: string
+  terminalName?: string
+  terminalStatus?: TerminalSessionStatus
+  terminalLastActivityAt?: string
+  taskId?: string
+  taskTitle?: string
+}
 
 export interface TerminalSessionSnapshot {
   id: string
   launcherId: TerminalLauncherId
   name: string
   cwd?: string
+  status?: TerminalSessionStatus
+  lastActivityAt?: string
+  lastOutputPreview?: string
+  exitCode?: number
+  taskId?: string
 }
 
 export interface TerminalBufferSnapshot {
   output: string
   sequence: number
+}
+
+export type TaskState = 'idea' | 'running' | 'blocked' | 'review' | 'done'
+export type TaskSignal = 'active' | 'idle' | 'waiting' | 'exited' | 'failed' | 'stale' | 'complete'
+
+export interface TaskItem {
+  id: string
+  title: string
+  brief: string
+  state: TaskState
+  projectName?: string
+  projectPath?: string
+  sourceConversationId?: string
+  terminalSessionIds: string[]
+  workflowRunIds: string[]
+  createdAt: string
+  updatedAt: string
+  archivedAt?: string
+  lastActivityAt?: string
+  signal?: TaskSignal
+  signalReason?: string
+  suggestedState?: TaskState
+}
+
+export interface TaskCreateInput {
+  title: string
+  brief?: string
+  state?: TaskState
+  projectName?: string
+  projectPath?: string
+  sourceConversationId?: string
+  terminalSessionIds?: string[]
+  workflowRunIds?: string[]
+}
+
+export interface TaskUpdateInput {
+  title?: string
+  brief?: string
+  state?: TaskState
+  projectName?: string
+  projectPath?: string
+  sourceConversationId?: string
+  terminalSessionIds?: string[]
+  workflowRunIds?: string[]
+  archivedAt?: string
+}
+
+export interface PromoteConversationToTaskInput {
+  title?: string
+  brief?: string
+  state?: TaskState
 }
 
 export type WorkflowAgentProvider = 'anthropic' | 'openai' | 'google'
@@ -283,11 +355,12 @@ export interface WorkflowRun {
 export interface TerminalApi {
   listTerminalSessions: () => Promise<TerminalSessionSnapshot[]>
   getTerminalBuffer: (id: string) => Promise<TerminalBufferSnapshot>
-  createTerminal: (id: string, launcherId: TerminalLauncherId, name: string, cwd?: string) => Promise<TerminalSessionSnapshot>
+  createTerminal: (id: string, launcherId: TerminalLauncherId, name: string, cwd?: string, taskId?: string) => Promise<TerminalSessionSnapshot>
   sendTerminalInput: (id: string, data: string) => Promise<boolean>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<void>
   selectDirectory: () => Promise<string | null>
+  onTerminalCreated: (cb: (session: TerminalSessionSnapshot) => void) => () => void
   onTerminalData: (cb: (id: string, data: string, sequence: number) => void) => () => void
   onTerminalExit: (cb: (id: string, code: number) => void) => () => void
 }
@@ -300,6 +373,14 @@ export interface ChatApi {
   getSkills: () => Promise<SkillEntry[]>
   getUsageLimits: () => Promise<UsageLimitSettings>
   saveUsageLimits: (limits: UsageLimitSettings) => Promise<UsageLimitSettings>
+  getTasks: () => Promise<TaskItem[]>
+  createTask: (input: TaskCreateInput) => Promise<TaskItem>
+  updateTask: (id: string, input: TaskUpdateInput) => Promise<TaskItem | null>
+  updateTaskState: (id: string, state: TaskState) => Promise<TaskItem | null>
+  archiveTask: (id: string) => Promise<TaskItem | null>
+  promoteConversationToTask: (conversationId: string, input?: PromoteConversationToTaskInput) => Promise<TaskItem>
+  startTaskTerminal: (taskId: string, launcherId: TerminalLauncherId) => Promise<TerminalSessionSnapshot>
+  startTaskWorkflow: (taskId: string) => Promise<WorkflowRun>
   sendMessage: (conversationId: string, content: string, modelChoice: ModelChoice, options?: SendMessageOptions) => Promise<void>
   newConversation: () => Promise<Conversation>
   deleteConversation: (id: string) => Promise<void>
@@ -319,6 +400,12 @@ export interface ChatApi {
   disconnectGemini: () => Promise<void>
   getGeminiModel: () => Promise<GeminiModel>
   setGeminiModel: (model: GeminiModel) => Promise<void>
+
+  getDeepSeekKeyStatus: () => Promise<{ configured: boolean }>
+  setDeepSeekKey: (key: string) => Promise<void>
+  disconnectDeepSeek: () => Promise<void>
+  getDeepSeekModel: () => Promise<DeepSeekModel>
+  setDeepSeekModel: (model: DeepSeekModel) => Promise<void>
 
   getOllamaStatus: () => Promise<{ configured: boolean; model?: string; baseUrl?: string }>
   setOllamaConfig: (baseUrl: string, model: string) => Promise<void>
@@ -341,6 +428,8 @@ export interface ChatApi {
   onMessageDone: (cb: (conversationId: string, message: ChatMessage) => void) => () => void
   onError: (cb: (conversationId: string, messageId: string, error: string) => void) => () => void
   onCanceled: (cb: (conversationId: string, messageId: string) => void) => () => void
+  onConversationsUpdated: (cb: (conversations: Conversation[]) => void) => () => void
+  onTasksUpdated: (cb: (tasks: TaskItem[]) => void) => () => void
 
   getAgentProfiles: () => Promise<AgentProfile[]>
   saveAgentProfile: (profile: AgentProfile) => Promise<AgentProfile[]>
