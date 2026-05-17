@@ -253,7 +253,17 @@ function TaskDragPreview({ task }: { task: TaskItem }) {
   )
 }
 
-export function TasksPane() {
+export function TasksPane({
+  workspaceId,
+  workspaceKind,
+  workspaceProjectPath,
+  repoWorkspacePaths = [],
+}: {
+  workspaceId?: string | null
+  workspaceKind?: 'repo' | 'general'
+  workspaceProjectPath?: string
+  repoWorkspacePaths?: string[]
+}) {
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -274,7 +284,20 @@ export function TasksPane() {
     }
   }, [])
 
-  const visibleTasks = tasks.filter((task) => !task.archivedAt)
+  const visibleTasks = tasks.filter((task) => {
+    if (task.archivedAt) return false
+    if (!workspaceId) return true
+    if (task.workspaceId === workspaceId) return true
+    if (workspaceKind === 'repo' && workspaceProjectPath && task.projectPath) {
+      return task.projectPath === workspaceProjectPath || task.projectPath.startsWith(`${workspaceProjectPath}/`)
+    }
+    if (workspaceKind === 'general') {
+      return !task.projectPath || !repoWorkspacePaths.some((repoPath) => (
+        task.projectPath === repoPath || task.projectPath.startsWith(`${repoPath}/`)
+      ))
+    }
+    return false
+  })
   const activeDragTask = activeDragTaskId
     ? visibleTasks.find((task) => task.id === activeDragTaskId) ?? tasks.find((task) => task.id === activeDragTaskId) ?? null
     : null

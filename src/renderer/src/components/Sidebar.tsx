@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  ConnectorInventory,
   Conversation,
+  ThreadStatus,
 } from '../../../shared/types'
 import { useChatStore } from '../store/chat'
 
 interface Props {
   onNew: () => void
   onConversationSelect?: () => void
-  onUtilitySelect?: () => void
+  workspaceId?: string | null
+  workspaceKind?: 'repo' | 'general'
+  workspaceProjectPath?: string
+  repoWorkspacePaths?: string[]
 }
 
 interface ProjectGroup {
@@ -21,6 +24,26 @@ const PROJECT_CONVERSATION_PREVIEW_LIMIT = 5
 
 function projectKey(project: ProjectGroup): string {
   return project.path ?? project.name
+}
+
+function conversationMatchesWorkspace(
+  conversation: Conversation,
+  workspaceId?: string | null,
+  workspaceKind?: 'repo' | 'general',
+  workspaceProjectPath?: string,
+  repoWorkspacePaths: string[] = [],
+): boolean {
+  if (!workspaceId) return true
+  if (conversation.workspaceId === workspaceId) return true
+  if (workspaceKind === 'repo' && workspaceProjectPath && conversation.projectPath) {
+    return conversation.projectPath === workspaceProjectPath || conversation.projectPath.startsWith(`${workspaceProjectPath}/`)
+  }
+  if (workspaceKind === 'general') {
+    return !conversation.projectPath || !repoWorkspacePaths.some((repoPath) => (
+      conversation.projectPath === repoPath || conversation.projectPath.startsWith(`${repoPath}/`)
+    ))
+  }
+  return false
 }
 
 function formatRelativeTime(value: string): string {
@@ -60,38 +83,6 @@ function SearchIcon() {
   )
 }
 
-function PlugIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <rect x="3" y="3" width="5" height="5" rx="1.2" />
-      <rect x="12" y="3" width="5" height="5" rx="1.2" />
-      <rect x="3" y="12" width="5" height="5" rx="1.2" />
-      <rect x="12" y="12" width="5" height="5" rx="1.2" />
-      <path d="M8 5.5h4M5.5 8v4M14.5 8v4M8 14.5h4" />
-    </svg>
-  )
-}
-
-function ClockIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <circle cx="10" cy="10" r="7" />
-      <path d="M10 6v4.2l2.8 1.8" />
-    </svg>
-  )
-}
-
-function ChartIcon() {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M3.5 15.5h13" />
-      <path d="M6 13V9" />
-      <path d="M10 13V5.5" />
-      <path d="M14 13v-3" />
-    </svg>
-  )
-}
-
 function FolderIcon() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -100,31 +91,51 @@ function FolderIcon() {
   )
 }
 
-function countConnectorItems(inventory: ConnectorInventory | null): number {
-  if (!inventory) return 0
-  return inventory.providers.reduce((count, provider) => count + provider.items.length, 0)
+function statusLabel(status: ThreadStatus | undefined): string | null {
+  if (status === 'paused') return 'Paused'
+  if (status === 'completed') return 'Done'
+  if (status === 'archived') return 'Archived'
+  return null
 }
 
-export function Sidebar({ onNew, onConversationSelect, onUtilitySelect }: Props) {
-  const { conversations, activeId, activePane, setActiveId, setActivePane, removeConversation } = useChatStore()
+export function Sidebar({
+  onNew,
+  onConversationSelect,
+  workspaceId,
+  workspaceKind,
+  workspaceProjectPath,
+  repoWorkspacePaths = [],
+}: Props) {
+  const { conversations, activeId, setActiveId, replaceConversation } = useChatStore()
   const [searchTerm, setSearchTerm] = useState('')
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({})
   const [expandedProjectHistory, setExpandedProjectHistory] = useState<Record<string, boolean>>({})
-  const [connectorInventory, setConnectorInventory] = useState<ConnectorInventory | null>(null)
+  const [archivedOpen, setArchivedOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const activeConversation = conversations.find((conversation) => conversation.id === activeId) ?? null
+  const shouldGroupByProject = !workspaceId
 
-  useEffect(() => {
-    window.api.getConnectorInventory().then(setConnectorInventory)
-  }, [])
-
-  const filteredConversations = useMemo(() => {
+  const visibleConversations = useMemo(() => {
     const query = searchTerm.trim().toLowerCase()
-    if (!query) return conversations
-    return conversations.filter((conv) => {
+    const workspaceScoped = conversations
+      .filter((conv) => conversationMatchesWorkspace(
+        conv,
+        workspaceId,
+        workspaceKind,
+        workspaceProjectPath,
+        repoWorkspacePaths,
+      ))
+    if (!query) return workspaceScoped
+    return workspaceScoped.filter((conv) => {
       const haystack = [
         conv.title,
         conv.projectName,
         conv.projectPath,
+        conv.workspaceSnapshot?.gitBranch,
+        conv.resumeState?.userGoal,
+        conv.resumeState?.currentState,
+        ...(conv.resumeState?.filesTouched ?? []),
+        ...(conv.resumeState?.nextSteps ?? []),
         conv.messages.at(-1)?.content,
       ]
         .filter(Boolean)
@@ -132,13 +143,34 @@ export function Sidebar({ onNew, onConversationSelect, onUtilitySelect }: Props)
         .toLowerCase()
       return haystack.includes(query)
     })
-  }, [conversations, searchTerm])
+  }, [conversations, searchTerm, workspaceId, workspaceKind, workspaceProjectPath, repoWorkspacePaths])
 
-  const grouped = useMemo(() => {
+  const openConversations = useMemo(
+    () => visibleConversations.filter((conversation) => conversation.status !== 'archived'),
+    [visibleConversations],
+  )
+
+  const archivedConversations = useMemo(
+    () => visibleConversations.filter((conversation) => conversation.status === 'archived'),
+    [visibleConversations],
+  )
+
+  const activeConversationIsOutsideWorkspace = !!(
+    activeConversation &&
+    !conversationMatchesWorkspace(
+      activeConversation,
+      workspaceId,
+      workspaceKind,
+      workspaceProjectPath,
+      repoWorkspacePaths,
+    )
+  )
+
+  function groupConversations(source: Conversation[]) {
     const projectMap = new Map<string, ProjectGroup>()
     const unassigned: Conversation[] = []
 
-    filteredConversations.forEach((conv) => {
+    source.forEach((conv) => {
       if (!conv.projectName) {
         unassigned.push(conv)
         return
@@ -170,12 +202,28 @@ export function Sidebar({ onNew, onConversationSelect, onUtilitySelect }: Props)
     })
 
     return { projects, unassigned }
-  }, [filteredConversations])
+  }
 
-  async function handleDelete(event: React.MouseEvent, id: string) {
+  const grouped = useMemo(() => groupConversations(openConversations), [openConversations])
+  const archivedGrouped = useMemo(() => groupConversations(archivedConversations), [archivedConversations])
+  const sortedOpenConversations = useMemo(() => [...openConversations].sort((a, b) => {
+    const aTime = a.updatedAt ?? a.createdAt
+    const bTime = b.updatedAt ?? b.createdAt
+    return bTime.localeCompare(aTime)
+  }), [openConversations])
+  const sortedArchivedConversations = useMemo(() => [...archivedConversations].sort((a, b) => {
+    const aTime = a.updatedAt ?? a.createdAt
+    const bTime = b.updatedAt ?? b.createdAt
+    return bTime.localeCompare(aTime)
+  }), [archivedConversations])
+
+  async function handleThreadStatus(event: React.MouseEvent, conversation: Conversation) {
     event.stopPropagation()
-    await window.api.deleteConversation(id)
-    removeConversation(id)
+    const next = await window.api.updateThreadStatus(
+      conversation.id,
+      conversation.status === 'archived' ? 'active' : 'archived',
+    )
+    if (next) replaceConversation(next)
   }
 
   function handleToggleProject(project: ProjectGroup) {
@@ -199,11 +247,6 @@ export function Sidebar({ onNew, onConversationSelect, onUtilitySelect }: Props)
     onConversationSelect?.()
   }
 
-  function handleSelectUtility(pane: 'usage' | 'connections') {
-    setActivePane(pane)
-    onUtilitySelect?.()
-  }
-
   return (
     <aside className="relay-sidebar">
       <div className="relay-sidebar__top">
@@ -222,74 +265,322 @@ export function Sidebar({ onNew, onConversationSelect, onUtilitySelect }: Props)
             placeholder="Search"
           />
         </div>
-
-        <button
-          type="button"
-          className={`relay-nav-action${activePane === 'connections' ? ' is-active' : ''}`}
-          onClick={() => handleSelectUtility('connections')}
-        >
-          <span className="relay-nav-action__icon"><PlugIcon /></span>
-          <span className="relay-nav-action__label">Connections</span>
-          <span className="relay-nav-action__meta">{countConnectorItems(connectorInventory)}</span>
-        </button>
-
-        <button type="button" className="relay-nav-action relay-nav-action--muted">
-          <span className="relay-nav-action__icon"><ClockIcon /></span>
-          <span className="relay-nav-action__label">Automations</span>
-          <span className="relay-nav-action__meta">Soon</span>
-        </button>
-
-        <button
-          type="button"
-          className={`relay-nav-action relay-nav-action--secondary${activePane === 'usage' ? ' is-active' : ''}`}
-          onClick={() => handleSelectUtility('usage')}
-        >
-          <span className="relay-nav-action__icon"><ChartIcon /></span>
-          <span className="relay-nav-action__label">Usage</span>
-          <span className="relay-nav-action__meta">Live</span>
-        </button>
       </div>
 
       <div className="relay-sidebar__content">
         <>
-            <section className="relay-sidebar-section">
-              <div className="relay-sidebar-section__header">
-                <span className="relay-sidebar-section__label">Projects</span>
-              </div>
+            {activeConversationIsOutsideWorkspace && activeConversation && (
+              <section className="relay-sidebar-section relay-sidebar-section--current">
+                <div className="relay-sidebar-section__header">
+                  <span className="relay-sidebar-section__label">Current chat</span>
+                  <span className="relay-sidebar-section__hint">Outside workspace</span>
+                </div>
 
-              {grouped.projects.length === 0 && (
-                <div className="relay-sidebar-empty">No project threads yet.</div>
-              )}
+                <div className="relay-project-group__list relay-project-group__list--root">
+                  <button
+                    type="button"
+                    className="relay-conversation-item is-active"
+                    onClick={() => handleSelectConversation(activeConversation.id)}
+                  >
+                      <span className="relay-conversation-item__main">
+                        <span className="relay-conversation-item__title">{activeConversation.title}</span>
+                        {statusLabel(activeConversation.status) && (
+                          <span className="relay-conversation-item__status">{statusLabel(activeConversation.status)}</span>
+                        )}
+                      </span>
+                    <span className="relay-conversation-item__side">
+                      <span className="relay-conversation-item__time">
+                        {formatRelativeTime(activeConversation.updatedAt ?? activeConversation.createdAt)}
+                      </span>
+                      {!activeConversation.readOnly && (
+                        <span
+                          className="relay-conversation-item__delete"
+                          title={activeConversation.status === 'archived' ? 'Restore thread' : 'Archive thread'}
+                          onClick={(event) => void handleThreadStatus(event, activeConversation)}
+                        >
+                          {activeConversation.status === 'archived' ? '↺' : '×'}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </div>
+              </section>
+            )}
 
-              {grouped.projects.map((project) => {
-                const key = projectKey(project)
-                const hasActiveConversation = project.conversations.some((conv) => conv.id === activeId)
-                const isCollapsed = collapsedProjects[key] ?? !hasActiveConversation
-                const activeConversationIndex = project.conversations.findIndex((conv) => conv.id === activeId)
-                const activeConversationNeedsExpansion = activeConversationIndex >= PROJECT_CONVERSATION_PREVIEW_LIMIT
-                const searchIsActive = searchTerm.trim().length > 0
-                const isHistoryExpanded = (expandedProjectHistory[key] ?? false) || activeConversationNeedsExpansion || searchIsActive
-                const visibleConversations = isHistoryExpanded
-                  ? project.conversations
-                  : project.conversations.slice(0, PROJECT_CONVERSATION_PREVIEW_LIMIT)
-                const hiddenConversationCount = project.conversations.length - visibleConversations.length
+            {shouldGroupByProject ? (
+              <>
+                <section className="relay-sidebar-section">
+                  <div className="relay-sidebar-section__header">
+                    <span className="relay-sidebar-section__label">Projects</span>
+                  </div>
 
-                return (
-                  <div key={key} className="relay-project-group">
-                    <button
-                      type="button"
-                      className="relay-project-group__title"
-                      onClick={() => handleToggleProject(project)}
-                    >
-                      <span className={`relay-project-group__chevron${isCollapsed ? ' is-collapsed' : ''}`}>▾</span>
-                      <span className="relay-project-group__icon"><FolderIcon /></span>
-                      <span className="relay-project-group__name">{project.name}</span>
-                      <span className="relay-project-group__count">{project.conversations.length}</span>
-                    </button>
+                  {grouped.projects.length === 0 && (
+                    <div className="relay-sidebar-empty">No project threads yet.</div>
+                  )}
 
-                    {!isCollapsed && (
-                      <div className="relay-project-group__list">
-                        {visibleConversations.map((conv) => {
+                  {grouped.projects.map((project) => {
+                    const key = projectKey(project)
+                    const hasActiveConversation = project.conversations.some((conv) => conv.id === activeId)
+                    const isCollapsed = collapsedProjects[key] ?? !hasActiveConversation
+                    const activeConversationIndex = project.conversations.findIndex((conv) => conv.id === activeId)
+                    const activeConversationNeedsExpansion = activeConversationIndex >= PROJECT_CONVERSATION_PREVIEW_LIMIT
+                    const searchIsActive = searchTerm.trim().length > 0
+                    const isHistoryExpanded = (expandedProjectHistory[key] ?? false) || activeConversationNeedsExpansion || searchIsActive
+                    const visibleConversations = isHistoryExpanded
+                      ? project.conversations
+                      : project.conversations.slice(0, PROJECT_CONVERSATION_PREVIEW_LIMIT)
+                    const hiddenConversationCount = project.conversations.length - visibleConversations.length
+
+                    return (
+                      <div key={key} className="relay-project-group">
+                        <button
+                          type="button"
+                          className="relay-project-group__title"
+                          onClick={() => handleToggleProject(project)}
+                        >
+                          <span className={`relay-project-group__chevron${isCollapsed ? ' is-collapsed' : ''}`}>▾</span>
+                          <span className="relay-project-group__icon"><FolderIcon /></span>
+                          <span className="relay-project-group__name">{project.name}</span>
+                          <span className="relay-project-group__count">{project.conversations.length}</span>
+                        </button>
+
+                        {!isCollapsed && (
+                          <div className="relay-project-group__list">
+                            {visibleConversations.map((conv) => {
+                              const isActive = conv.id === activeId
+                              return (
+                                <button
+                                  key={conv.id}
+                                  type="button"
+                                  className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
+                                  onClick={() => handleSelectConversation(conv.id)}
+                                >
+                                  <span className="relay-conversation-item__main">
+                                    <span className="relay-conversation-item__title">{conv.title}</span>
+                                    {statusLabel(conv.status) && (
+                                      <span className="relay-conversation-item__status">{statusLabel(conv.status)}</span>
+                                    )}
+                                  </span>
+                                  <span className="relay-conversation-item__side">
+                                    <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
+                                    {!conv.readOnly && (
+                                      <span
+                                        className="relay-conversation-item__delete"
+                                        title={conv.status === 'archived' ? 'Restore thread' : 'Archive thread'}
+                                        onClick={(event) => void handleThreadStatus(event, conv)}
+                                      >
+                                        {conv.status === 'archived' ? '↺' : '×'}
+                                      </span>
+                                    )}
+                                  </span>
+                                </button>
+                              )
+                            })}
+                            {hiddenConversationCount > 0 && (
+                              <button
+                                type="button"
+                                className="relay-project-group__more"
+                                onClick={() => handleShowMoreProject(project)}
+                              >
+                                See more
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </section>
+
+                {grouped.unassigned.length > 0 && (
+                  <section className="relay-sidebar-section">
+                    <div className="relay-sidebar-section__header">
+                      <span className="relay-sidebar-section__label">Chats</span>
+                    </div>
+
+                    <div className="relay-project-group__list relay-project-group__list--root">
+                      {grouped.unassigned.map((conv) => {
+                        const isActive = conv.id === activeId
+                        return (
+                          <button
+                            key={conv.id}
+                            type="button"
+                            className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
+                            onClick={() => handleSelectConversation(conv.id)}
+                          >
+                              <span className="relay-conversation-item__main">
+                                <span className="relay-conversation-item__title">{conv.title}</span>
+                                {statusLabel(conv.status) && (
+                                  <span className="relay-conversation-item__status">{statusLabel(conv.status)}</span>
+                                )}
+                              </span>
+                            <span className="relay-conversation-item__side">
+                              <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
+                              {!conv.readOnly && (
+                                <span
+                                  className="relay-conversation-item__delete"
+                                  title={conv.status === 'archived' ? 'Restore thread' : 'Archive thread'}
+                                  onClick={(event) => void handleThreadStatus(event, conv)}
+                                >
+                                  {conv.status === 'archived' ? '↺' : '×'}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </section>
+                )}
+              </>
+            ) : (
+              <section className="relay-sidebar-section">
+                <div className="relay-sidebar-section__header">
+                  <span className="relay-sidebar-section__label">Chats</span>
+                </div>
+
+                {sortedOpenConversations.length === 0 && (
+                  <div className="relay-sidebar-empty">No chats in this workspace yet.</div>
+                )}
+
+                <div className="relay-project-group__list relay-project-group__list--root">
+                  {sortedOpenConversations.map((conv) => {
+                    const isActive = conv.id === activeId
+                    return (
+                      <button
+                        key={conv.id}
+                        type="button"
+                        className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
+                        onClick={() => handleSelectConversation(conv.id)}
+                      >
+                          <span className="relay-conversation-item__main">
+                            <span className="relay-conversation-item__title">{conv.title}</span>
+                            {statusLabel(conv.status) && (
+                              <span className="relay-conversation-item__status">{statusLabel(conv.status)}</span>
+                            )}
+                          </span>
+                        <span className="relay-conversation-item__side">
+                          <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
+                          {!conv.readOnly && (
+                            <span
+                              className="relay-conversation-item__delete"
+                              title={conv.status === 'archived' ? 'Restore thread' : 'Archive thread'}
+                              onClick={(event) => void handleThreadStatus(event, conv)}
+                            >
+                              {conv.status === 'archived' ? '↺' : '×'}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+
+            {archivedConversations.length > 0 && (
+              <section className="relay-sidebar-section relay-sidebar-section--archived">
+                <button
+                  type="button"
+                  className="relay-sidebar-section__toggle"
+                  onClick={() => setArchivedOpen((value) => !value)}
+                  aria-expanded={archivedOpen}
+                >
+                  <span className="relay-sidebar-section__label">Archived</span>
+                  <span className="relay-sidebar-section__hint">
+                    {archivedConversations.length}
+                  </span>
+                  <span className={`relay-sidebar-section__chevron${archivedOpen ? '' : ' is-collapsed'}`}>▾</span>
+                </button>
+
+                {archivedOpen && (
+                  <div className="relay-archive-stack">
+                    {shouldGroupByProject ? (
+                      <>
+                        {archivedGrouped.projects.map((project) => (
+                          <div key={`archived-${projectKey(project)}`} className="relay-project-group relay-project-group--archived">
+                            <div className="relay-project-group__title relay-project-group__title--static">
+                              <span className="relay-project-group__icon"><FolderIcon /></span>
+                              <span className="relay-project-group__name">{project.name}</span>
+                              <span className="relay-project-group__count">{project.conversations.length}</span>
+                            </div>
+
+                            <div className="relay-project-group__list">
+                              {project.conversations.map((conv) => {
+                                const isActive = conv.id === activeId
+                                return (
+                                  <button
+                                    key={conv.id}
+                                    type="button"
+                                    className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
+                                    onClick={() => handleSelectConversation(conv.id)}
+                                  >
+                                    <span className="relay-conversation-item__main">
+                                      <span className="relay-conversation-item__title">{conv.title}</span>
+                                      <span className="relay-conversation-item__status">Archived</span>
+                                    </span>
+                                    <span className="relay-conversation-item__side">
+                                      <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
+                                      {!conv.readOnly && (
+                                        <span
+                                          className="relay-conversation-item__delete"
+                                          title="Restore thread"
+                                          onClick={(event) => void handleThreadStatus(event, conv)}
+                                        >
+                                          ↺
+                                        </span>
+                                      )}
+                                    </span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+
+                        {archivedGrouped.unassigned.length > 0 && (
+                          <div className="relay-project-group relay-project-group--archived">
+                            <div className="relay-project-group__title relay-project-group__title--static">
+                              <span className="relay-project-group__name">Chats</span>
+                              <span className="relay-project-group__count">{archivedGrouped.unassigned.length}</span>
+                            </div>
+
+                            <div className="relay-project-group__list relay-project-group__list--root">
+                              {archivedGrouped.unassigned.map((conv) => {
+                                const isActive = conv.id === activeId
+                                return (
+                                  <button
+                                    key={conv.id}
+                                    type="button"
+                                    className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
+                                    onClick={() => handleSelectConversation(conv.id)}
+                                  >
+                                    <span className="relay-conversation-item__main">
+                                      <span className="relay-conversation-item__title">{conv.title}</span>
+                                      <span className="relay-conversation-item__status">Archived</span>
+                                    </span>
+                                    <span className="relay-conversation-item__side">
+                                      <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
+                                      {!conv.readOnly && (
+                                        <span
+                                          className="relay-conversation-item__delete"
+                                          title="Restore thread"
+                                          onClick={(event) => void handleThreadStatus(event, conv)}
+                                        >
+                                          ↺
+                                        </span>
+                                      )}
+                                    </span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="relay-project-group__list relay-project-group__list--root">
+                        {sortedArchivedConversations.map((conv) => {
                           const isActive = conv.id === activeId
                           return (
                             <button
@@ -300,71 +591,27 @@ export function Sidebar({ onNew, onConversationSelect, onUtilitySelect }: Props)
                             >
                               <span className="relay-conversation-item__main">
                                 <span className="relay-conversation-item__title">{conv.title}</span>
+                                <span className="relay-conversation-item__status">Archived</span>
                               </span>
                               <span className="relay-conversation-item__side">
                                 <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
                                 {!conv.readOnly && (
                                   <span
                                     className="relay-conversation-item__delete"
-                                    onClick={(event) => void handleDelete(event, conv.id)}
+                                    title="Restore thread"
+                                    onClick={(event) => void handleThreadStatus(event, conv)}
                                   >
-                                    ×
+                                    ↺
                                   </span>
                                 )}
                               </span>
                             </button>
                           )
                         })}
-                        {hiddenConversationCount > 0 && (
-                          <button
-                            type="button"
-                            className="relay-project-group__more"
-                            onClick={() => handleShowMoreProject(project)}
-                          >
-                            See more
-                          </button>
-                        )}
                       </div>
                     )}
                   </div>
-                )
-              })}
-            </section>
-
-            {grouped.unassigned.length > 0 && (
-              <section className="relay-sidebar-section">
-                <div className="relay-sidebar-section__header">
-                  <span className="relay-sidebar-section__label">Chats</span>
-                </div>
-
-                <div className="relay-project-group__list relay-project-group__list--root">
-                  {grouped.unassigned.map((conv) => {
-                    const isActive = conv.id === activeId
-                    return (
-                      <button
-                        key={conv.id}
-                        type="button"
-                        className={`relay-conversation-item${isActive ? ' is-active' : ''}`}
-                        onClick={() => handleSelectConversation(conv.id)}
-                      >
-                        <span className="relay-conversation-item__main">
-                          <span className="relay-conversation-item__title">{conv.title}</span>
-                        </span>
-                        <span className="relay-conversation-item__side">
-                          <span className="relay-conversation-item__time">{formatRelativeTime(conv.updatedAt ?? conv.createdAt)}</span>
-                          {!conv.readOnly && (
-                            <span
-                              className="relay-conversation-item__delete"
-                              onClick={(event) => void handleDelete(event, conv.id)}
-                            >
-                              ×
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
+                )}
               </section>
             )}
         </>

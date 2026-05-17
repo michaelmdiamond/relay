@@ -65,6 +65,43 @@ export interface ConversationMemory {
   updatedAt?: string
 }
 
+export type ThreadStatus = 'active' | 'paused' | 'completed' | 'archived'
+
+export interface ThreadWorkspaceSnapshot {
+  workspaceId?: string
+  projectName?: string
+  projectPath?: string
+  gitRemote?: string
+  gitBranch?: string
+  gitCommit?: string
+  capturedAt: string
+}
+
+export interface ThreadResumeState {
+  userGoal?: string
+  currentState?: string
+  decisions: string[]
+  constraints: string[]
+  filesTouched: string[]
+  commandsRun: string[]
+  testsRun: string[]
+  blockers: string[]
+  openQuestions: string[]
+  nextSteps: string[]
+  updatedAt: string
+  generatedFromMessageId?: string
+}
+
+export interface ThreadToolEventSummary {
+  id: string
+  kind: 'terminal' | 'task' | 'workflow' | 'file' | 'git' | 'external'
+  title: string
+  detail?: string
+  status?: 'succeeded' | 'failed' | 'canceled' | 'unknown'
+  createdAt: string
+  relatedId?: string
+}
+
 export interface ContextPacketFile {
   path: string
   reason: string
@@ -196,12 +233,20 @@ export interface Conversation {
   messages: ChatMessage[]
   createdAt: string
   updatedAt?: string
+  status?: ThreadStatus
+  workspaceId?: string
   projectName?: string
   projectPath?: string
+  workspaceSnapshot?: ThreadWorkspaceSnapshot
   source?: ConversationSource
   readOnly?: boolean
   mode?: ChatMode
   memory?: ConversationMemory
+  resumeState?: ThreadResumeState
+  toolEventSummaries?: ThreadToolEventSummary[]
+  archivedAt?: string
+  completedAt?: string
+  sourceConversationId?: string
   externalLink?: ExternalConversationLink
 }
 
@@ -221,6 +266,7 @@ export interface TerminalSessionSnapshot {
   id: string
   launcherId: TerminalLauncherId
   name: string
+  workspaceId?: string
   cwd?: string
   status?: TerminalSessionStatus
   lastActivityAt?: string
@@ -242,6 +288,7 @@ export interface TaskItem {
   title: string
   brief: string
   state: TaskState
+  workspaceId?: string
   projectName?: string
   projectPath?: string
   sourceConversationId?: string
@@ -260,6 +307,7 @@ export interface TaskCreateInput {
   title: string
   brief?: string
   state?: TaskState
+  workspaceId?: string
   projectName?: string
   projectPath?: string
   sourceConversationId?: string
@@ -271,6 +319,7 @@ export interface TaskUpdateInput {
   title?: string
   brief?: string
   state?: TaskState
+  workspaceId?: string
   projectName?: string
   projectPath?: string
   sourceConversationId?: string
@@ -342,6 +391,7 @@ export interface WorkflowRun {
   workflowId: string
   workflowName: string
   goal: string
+  workspaceId?: string
   status: WorkflowRunStatus
   createdAt: string
   updatedAt: string
@@ -352,12 +402,77 @@ export interface WorkflowRun {
   steps: WorkflowStepRun[]
 }
 
+export type AutomationCatalogSource = 'relay' | 'codex' | 'claude'
+export type AutomationCatalogKind = 'agent' | 'workflow' | 'scheduled-task'
+export type AutomationCatalogStatus = 'active' | 'paused' | 'available' | 'detected'
+
+export interface AutomationCatalogItem {
+  id: string
+  source: AutomationCatalogSource
+  kind: AutomationCatalogKind
+  title: string
+  description: string
+  status: AutomationCatalogStatus
+  cadence?: string
+  model?: string
+  destination?: string
+  external?: boolean
+}
+
+export interface AutomationProviderSummary {
+  source: Exclude<AutomationCatalogSource, 'relay'>
+  label: string
+  status: 'connected' | 'detected' | 'unavailable'
+  detail: string
+  itemCount: number
+}
+
+export interface AutomationCatalogSnapshot {
+  generatedAt: string
+  items: AutomationCatalogItem[]
+  providers: AutomationProviderSummary[]
+}
+
+export interface Workspace {
+  id: string
+  name: string
+  kind: 'repo' | 'general'
+  projectPath?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type CodexThreadState = 'active' | 'completed' | 'idle' | 'interrupted' | 'stale'
+
+export interface CodexStatusItem {
+  id: string
+  title: string
+  cwd?: string
+  source?: string
+  modelProvider?: string
+  agentNickname?: string
+  agentRole?: string
+  model?: string
+  reasoningEffort?: string
+  updatedAt: string
+  lastActivityAt: string
+  state: CodexThreadState
+  lastMessage?: string
+}
+
+export interface CodexStatusSnapshot {
+  generatedAt: string
+  activeCount: number
+  completedCount: number
+  items: CodexStatusItem[]
+}
+
 export interface TerminalApi {
   listTerminalSessions: () => Promise<TerminalSessionSnapshot[]>
   getTerminalBuffer: (id: string) => Promise<TerminalBufferSnapshot>
-  createTerminal: (id: string, launcherId: TerminalLauncherId, name: string, cwd?: string, taskId?: string) => Promise<TerminalSessionSnapshot>
-  sendTerminalInput: (id: string, data: string) => Promise<boolean>
-  resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
+  createTerminal: (id: string, launcherId: TerminalLauncherId, name: string, cwd?: string, taskId?: string, workspaceId?: string) => Promise<TerminalSessionSnapshot>
+  sendTerminalInput: (id: string, data: string) => void
+  resizeTerminal: (id: string, cols: number, rows: number) => void
   killTerminal: (id: string) => Promise<void>
   selectDirectory: () => Promise<string | null>
   onTerminalCreated: (cb: (session: TerminalSessionSnapshot) => void) => () => void
@@ -368,6 +483,7 @@ export interface TerminalApi {
 export interface ChatApi {
   getApiKeyStatus: () => Promise<{ configured: boolean }>
   setApiKey: (key: string) => Promise<void>
+  getWorkspaces: () => Promise<Workspace[]>
   getConversations: () => Promise<Conversation[]>
   getConnectorInventory: () => Promise<ConnectorInventory>
   getSkills: () => Promise<SkillEntry[]>
@@ -382,8 +498,11 @@ export interface ChatApi {
   startTaskTerminal: (taskId: string, launcherId: TerminalLauncherId) => Promise<TerminalSessionSnapshot>
   startTaskWorkflow: (taskId: string) => Promise<WorkflowRun>
   sendMessage: (conversationId: string, content: string, modelChoice: ModelChoice, options?: SendMessageOptions) => Promise<void>
-  newConversation: () => Promise<Conversation>
+  newConversation: (workspaceId?: string) => Promise<Conversation>
   deleteConversation: (id: string) => Promise<void>
+  updateThreadStatus: (id: string, status: ThreadStatus) => Promise<Conversation | null>
+  updateThreadResumeState: (id: string, state: Partial<ThreadResumeState>) => Promise<Conversation | null>
+  cloneImportedConversation: (sourceId: string) => Promise<Conversation>
   updateConversationMemory: (conversationId: string, memory: ConversationMemory) => Promise<Conversation | null>
   compactConversation: (conversationId: string) => Promise<Conversation | null>
   estimateTokens: (text: string) => Promise<number>
@@ -394,6 +513,8 @@ export interface ChatApi {
   getCodexModel: () => Promise<string>
   setCodexModel: (model: string) => Promise<void>
   getCodexModels: () => Promise<{ models: string[]; error?: string }>
+  getCodexStatus: () => Promise<CodexStatusSnapshot>
+  focusCodexThread: (threadId: string) => Promise<void>
 
   getGeminiKeyStatus: () => Promise<{ configured: boolean }>
   setGeminiKey: (key: string) => Promise<void>
@@ -430,12 +551,15 @@ export interface ChatApi {
   onCanceled: (cb: (conversationId: string, messageId: string) => void) => () => void
   onConversationsUpdated: (cb: (conversations: Conversation[]) => void) => () => void
   onTasksUpdated: (cb: (tasks: TaskItem[]) => void) => () => void
+  onCodexStatusUpdated: (cb: (snapshot: CodexStatusSnapshot) => void) => () => void
+  onCodexThreadFocusRequested: (cb: (conversationId: string) => void) => () => void
 
   getAgentProfiles: () => Promise<AgentProfile[]>
   saveAgentProfile: (profile: AgentProfile) => Promise<AgentProfile[]>
   getWorkflowDefinitions: () => Promise<WorkflowDefinition[]>
   getWorkflowRuns: () => Promise<WorkflowRun[]>
-  startWorkflowRun: (workflowId: string, goal: string) => Promise<WorkflowRun>
+  startWorkflowRun: (workflowId: string, goal: string, workspaceId?: string) => Promise<WorkflowRun>
+  getAutomationCatalog: () => Promise<AutomationCatalogSnapshot>
   onWorkflowRunUpdated: (cb: (run: WorkflowRun) => void) => () => void
 }
 
