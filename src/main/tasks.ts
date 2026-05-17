@@ -43,6 +43,7 @@ function normalizeTask(raw: Partial<TaskItem>): TaskItem {
     title: normalizeString(raw.title) ?? 'Untitled task',
     brief: normalizeString(raw.brief) ?? '',
     state: normalizeTaskState(raw.state),
+    workspaceId: normalizeString(raw.workspaceId),
     projectName: normalizeString(raw.projectName),
     projectPath: normalizeString(raw.projectPath),
     sourceConversationId: normalizeString(raw.sourceConversationId),
@@ -117,13 +118,17 @@ function latestUserMessage(conversation: Conversation): string {
 }
 
 function buildPromotionDefaults(conversation: Conversation): { title: string; brief: string } {
-  const activeGoal = conversation.memory?.activeGoal?.trim()
+  const activeGoal = conversation.resumeState?.userGoal?.trim() || conversation.memory?.activeGoal?.trim()
   const latestUser = latestUserMessage(conversation).trim()
-  const summary = conversation.memory?.summary?.trim()
+  const summary = conversation.resumeState?.currentState?.trim() || conversation.memory?.summary?.trim()
+  const nextSteps = conversation.resumeState?.nextSteps?.length
+    ? `Next steps:\n${conversation.resumeState.nextSteps.map((step) => `- ${step}`).join('\n')}`
+    : ''
   const brief = [
     activeGoal,
     latestUser && latestUser !== activeGoal ? latestUser : '',
     summary ? `Context summary: ${summary}` : '',
+    nextSteps,
   ].filter(Boolean).join('\n\n')
 
   return {
@@ -255,6 +260,7 @@ export function createTask(input: TaskCreateInput): TaskItem {
     title: input.title,
     brief: input.brief,
     state: input.state ?? 'idea',
+    workspaceId: input.workspaceId,
     projectName: input.projectName,
     projectPath: input.projectPath,
     sourceConversationId: input.sourceConversationId,
@@ -295,6 +301,7 @@ export function promoteConversationToTask(conversation: Conversation, input: Pro
     title: input.title?.trim() || defaults.title,
     brief: input.brief?.trim() || defaults.brief,
     state: input.state ?? 'idea',
+    workspaceId: conversation.workspaceId,
     projectName: conversation.projectName,
     projectPath: conversation.projectPath,
     sourceConversationId: conversation.id,

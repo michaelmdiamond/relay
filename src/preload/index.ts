@@ -4,6 +4,7 @@ import type { ChatApi, TerminalApi } from '../shared/types'
 const api: ChatApi = {
   getApiKeyStatus: () => ipcRenderer.invoke('get-api-key-status'),
   setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),
+  getWorkspaces: () => ipcRenderer.invoke('get-workspaces'),
   getConversations: () => ipcRenderer.invoke('get-conversations'),
   getConnectorInventory: () => ipcRenderer.invoke('get-connector-inventory'),
   getSkills: () => ipcRenderer.invoke('get-skills'),
@@ -21,11 +22,15 @@ const api: ChatApi = {
   saveAgentProfile: (profile) => ipcRenderer.invoke('save-agent-profile', profile),
   getWorkflowDefinitions: () => ipcRenderer.invoke('get-workflow-definitions'),
   getWorkflowRuns: () => ipcRenderer.invoke('get-workflow-runs'),
-  startWorkflowRun: (workflowId, goal) => ipcRenderer.invoke('start-workflow-run', workflowId, goal),
+  startWorkflowRun: (workflowId, goal, workspaceId) => ipcRenderer.invoke('start-workflow-run', workflowId, goal, workspaceId),
+  getAutomationCatalog: () => ipcRenderer.invoke('get-automation-catalog'),
   sendMessage: (conversationId, content, modelChoice, options) =>
     ipcRenderer.invoke('send-message', conversationId, content, modelChoice, options),
-  newConversation: () => ipcRenderer.invoke('new-conversation'),
+  newConversation: (workspaceId) => ipcRenderer.invoke('new-conversation', workspaceId),
   deleteConversation: (id) => ipcRenderer.invoke('delete-conversation', id),
+  updateThreadStatus: (id, status) => ipcRenderer.invoke('update-thread-status', id, status),
+  updateThreadResumeState: (id, state) => ipcRenderer.invoke('update-thread-resume-state', id, state),
+  cloneImportedConversation: (sourceId) => ipcRenderer.invoke('clone-imported-conversation', sourceId),
   updateConversationMemory: (conversationId, memory) =>
     ipcRenderer.invoke('update-conversation-memory', conversationId, memory),
   compactConversation: (conversationId) => ipcRenderer.invoke('compact-conversation', conversationId),
@@ -37,6 +42,8 @@ const api: ChatApi = {
   getCodexModel: () => ipcRenderer.invoke('get-codex-model'),
   setCodexModel: (model) => ipcRenderer.invoke('set-codex-model', model),
   getCodexModels: () => ipcRenderer.invoke('get-codex-models'),
+  getCodexStatus: () => ipcRenderer.invoke('get-codex-status'),
+  focusCodexThread: (threadId) => ipcRenderer.invoke('focus-codex-thread', threadId),
 
   getGeminiKeyStatus: () => ipcRenderer.invoke('get-gemini-key-status'),
   setGeminiKey: (key) => ipcRenderer.invoke('set-gemini-key', key),
@@ -113,6 +120,18 @@ const api: ChatApi = {
     return () => ipcRenderer.off('tasks-updated', listener)
   },
 
+  onCodexStatusUpdated: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, snapshot: unknown) => cb(snapshot as never)
+    ipcRenderer.on('codex-status-updated', listener)
+    return () => ipcRenderer.off('codex-status-updated', listener)
+  },
+
+  onCodexThreadFocusRequested: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, conversationId: string) => cb(conversationId)
+    ipcRenderer.on('focus-codex-thread', listener)
+    return () => ipcRenderer.off('focus-codex-thread', listener)
+  },
+
   onWorkflowRunUpdated: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, run: unknown) => cb(run as never)
     ipcRenderer.on('workflow-run-updated', listener)
@@ -125,9 +144,9 @@ contextBridge.exposeInMainWorld('api', api)
 const terminalApi: TerminalApi = {
   listTerminalSessions: () => ipcRenderer.invoke('terminal-list'),
   getTerminalBuffer: (id) => ipcRenderer.invoke('terminal-buffer', id),
-  createTerminal: (id, launcherId, name, cwd, taskId) => ipcRenderer.invoke('terminal-create', id, launcherId, name, cwd, taskId),
-  sendTerminalInput: (id, data) => ipcRenderer.invoke('terminal-input', id, data),
-  resizeTerminal: (id, cols, rows) => ipcRenderer.invoke('terminal-resize', id, cols, rows),
+  createTerminal: (id, launcherId, name, cwd, taskId, workspaceId) => ipcRenderer.invoke('terminal-create', id, launcherId, name, cwd, taskId, workspaceId),
+  sendTerminalInput: (id, data) => ipcRenderer.send('terminal-input', id, data),
+  resizeTerminal: (id, cols, rows) => ipcRenderer.send('terminal-resize', id, cols, rows),
   killTerminal: (id) => ipcRenderer.invoke('terminal-kill', id),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
 

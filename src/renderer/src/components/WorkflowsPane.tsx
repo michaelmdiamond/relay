@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { CSSProperties } from 'react'
-import type { AgentProfile, WorkflowDefinition, WorkflowRun, WorkflowStepRun } from '../../../shared/types'
+import type { WorkflowDefinition, WorkflowRun, WorkflowStepRun } from '../../../shared/types'
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleString([], {
@@ -18,24 +17,26 @@ function statusTone(status: WorkflowRun['status'] | WorkflowStepRun['status']): 
   return 'rgba(255,255,255,0.08)'
 }
 
-export function WorkflowsPane() {
-  const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([])
+export function WorkflowsPane({
+  workspaceId,
+  workspaceKind,
+}: {
+  workspaceId?: string | null
+  workspaceKind?: 'repo' | 'general'
+}) {
   const [workflowDefinitions, setWorkflowDefinitions] = useState<WorkflowDefinition[]>([])
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([])
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [goal, setGoal] = useState('')
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
-  const [savingAgentId, setSavingAgentId] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
-      const [profiles, workflows, runs] = await Promise.all([
-        window.api.getAgentProfiles(),
+      const [workflows, runs] = await Promise.all([
         window.api.getWorkflowDefinitions(),
         window.api.getWorkflowRuns(),
       ])
-      setAgentProfiles(profiles)
       setWorkflowDefinitions(workflows)
       setWorkflowRuns(runs)
       setSelectedRunId((current) => current ?? runs[0]?.id ?? null)
@@ -57,33 +58,31 @@ export function WorkflowsPane() {
     return unsubscribe
   }, [])
 
+  const visibleWorkflowRuns = workflowRuns.filter((run) => {
+    if (!workspaceId) return true
+    if (run.workspaceId === workspaceId) return true
+    return workspaceKind === 'general' && !run.workspaceId
+  })
+
+  useEffect(() => {
+    if (selectedRunId && visibleWorkflowRuns.some((run) => run.id === selectedRunId)) return
+    setSelectedRunId(visibleWorkflowRuns[0]?.id ?? null)
+  }, [selectedRunId, visibleWorkflowRuns])
+
   const workflow = workflowDefinitions[0]
-  const selectedRun = workflowRuns.find((run) => run.id === selectedRunId) ?? workflowRuns[0] ?? null
+  const selectedRun = visibleWorkflowRuns.find((run) => run.id === selectedRunId) ?? visibleWorkflowRuns[0] ?? null
   async function handleStartRun() {
     if (!workflow || !goal.trim() || starting) return
     setError('')
     setStarting(true)
     try {
-      const run = await window.api.startWorkflowRun(workflow.id, goal.trim())
+      const run = await window.api.startWorkflowRun(workflow.id, goal.trim(), workspaceId ?? undefined)
       setGoal('')
       setSelectedRunId(run.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setStarting(false)
-    }
-  }
-
-  async function handleSaveAgent(profile: AgentProfile) {
-    setSavingAgentId(profile.id)
-    setError('')
-    try {
-      const next = await window.api.saveAgentProfile(profile)
-      setAgentProfiles(next)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSavingAgentId(null)
     }
   }
 
@@ -155,18 +154,6 @@ export function WorkflowsPane() {
             </div>
           )}
         </div>
-
-        <div style={{ marginBottom: 12, fontSize: 13, fontWeight: 700 }}>Agent Profiles</div>
-        <div style={{ display: 'grid', gap: 12 }}>
-          {agentProfiles.map((profile) => (
-            <AgentEditor
-              key={profile.id}
-              profile={profile}
-              onSave={handleSaveAgent}
-              saving={savingAgentId === profile.id}
-            />
-          ))}
-        </div>
       </aside>
 
       <section style={{ display: 'flex', flex: 1, minWidth: 0 }}>
@@ -178,7 +165,7 @@ export function WorkflowsPane() {
         }}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Runs</div>
           <div style={{ display: 'grid', gap: 10 }}>
-            {workflowRuns.map((run) => (
+            {visibleWorkflowRuns.map((run) => (
               <button
                 key={run.id}
                 type="button"
@@ -311,73 +298,6 @@ export function WorkflowsPane() {
   )
 }
 
-function AgentEditor({
-  profile,
-  onSave,
-  saving,
-}: {
-  profile: AgentProfile
-  onSave: (profile: AgentProfile) => Promise<void>
-  saving: boolean
-}) {
-  const [draft, setDraft] = useState(profile)
-
-  useEffect(() => {
-    setDraft(profile)
-  }, [profile])
-
-  return (
-    <div style={{
-      borderRadius: 14,
-      padding: 12,
-      background: 'rgba(255,255,255,0.04)',
-      border: '1px solid rgba(255,255,255,0.08)',
-    }}>
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{profile.name}</div>
-      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 10 }}>
-        {profile.role} · {profile.provider}
-      </div>
-
-      <label style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.45)' }}>Model</span>
-        <input
-          value={draft.model}
-          onChange={(event) => setDraft({ ...draft, model: event.target.value })}
-          style={fieldStyle}
-        />
-      </label>
-
-      <label style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.45)' }}>System Prompt</span>
-        <textarea
-          value={draft.systemPrompt}
-          onChange={(event) => setDraft({ ...draft, systemPrompt: event.target.value })}
-          rows={6}
-          style={{ ...fieldStyle, resize: 'vertical', lineHeight: 1.45 }}
-        />
-      </label>
-
-      <button
-        type="button"
-        onClick={() => void onSave(draft)}
-        disabled={saving}
-        style={{
-          width: '100%',
-          border: 'none',
-          borderRadius: 10,
-          padding: '9px 12px',
-          background: saving ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.12)',
-          color: saving ? 'rgba(255,255,255,0.4)' : '#fff',
-          fontWeight: 700,
-          cursor: saving ? 'default' : 'pointer',
-        }}
-      >
-        {saving ? 'Saving...' : 'Save Agent'}
-      </button>
-    </div>
-  )
-}
-
 function StatusPill({ label }: { label: string }) {
   return (
     <span style={{
@@ -432,14 +352,4 @@ function ArtifactLine({ label, value }: { label: string; value?: string }) {
       <div style={{ color: 'rgba(255,255,255,0.78)', whiteSpace: 'pre-wrap' }}>{value || 'n/a'}</div>
     </div>
   )
-}
-
-const fieldStyle: CSSProperties = {
-  width: '100%',
-  borderRadius: 10,
-  padding: 9,
-  background: 'rgba(0,0,0,0.2)',
-  border: '1px solid rgba(255,255,255,0.08)',
-  color: '#e2e8f0',
-  font: 'inherit',
 }

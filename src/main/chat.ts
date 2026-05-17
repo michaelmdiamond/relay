@@ -4,7 +4,7 @@ import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { randomUUID } from 'crypto'
-import type { ChatMessage, ChatMode, ContextAttachment, ContextPacket, Conversation, ConversationMemory, ExternalConversationLink, ModelChoice, RequestDiagnostics, SendMessageOptions, TerminalSessionSnapshot, TaskItem, TokenUsage } from '../shared/types'
+import type { ChatMessage, ChatMode, ContextAttachment, ContextPacket, Conversation, ConversationMemory, ExternalConversationLink, ModelChoice, RequestDiagnostics, SendMessageOptions, TerminalSessionSnapshot, TaskItem, ThreadResumeState, ThreadStatus, ThreadWorkspaceSnapshot, TokenUsage } from '../shared/types'
 import { route } from './router'
 import { isOpenAIConnected } from './openai-auth'
 import { getCodexModel, streamCodexMessage } from './openai-codex'
@@ -42,6 +42,55 @@ interface ImportedUsage {
   cached_input_tokens?: number | null
 }
 
+interface FileRevision {
+  size: number
+  mtimeMs: number
+}
+
+const codexImportCache = new Map<string, { revision: string; conversation: Conversation | null }>()
+const claudeImportCache = new Map<string, { revision: string; conversation: Conversation | null }>()
+
+function fileRevision(filePath?: string): FileRevision | null {
+  if (!filePath) return null
+  try {
+    const stat = fs.statSync(filePath)
+    if (!stat.isFile()) return null
+    return { size: stat.size, mtimeMs: stat.mtimeMs }
+  } catch {
+    return null
+  }
+}
+
+function revisionKey(revision: FileRevision | null): string {
+  return revision ? `${revision.size}:${revision.mtimeMs}` : ''
+}
+
+function codexRowRevision(row: CodexThreadRow): string {
+  return [
+    row.title,
+    row.cwd,
+    row.updated_at,
+    row.first_user_message,
+    row.rollout_path,
+    revisionKey(fileRevision(row.rollout_path)),
+  ].join('|')
+}
+
+function nowIso(): string {
+  return new Date().toISOString()
+}
+
+function normalizeString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed || undefined
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0))]
+}
+
 function safeReadJsonLines(filePath: string): unknown[] {
   try {
     return fs.readFileSync(filePath, 'utf8')
@@ -54,16 +103,116 @@ function safeReadJsonLines(filePath: string): unknown[] {
   }
 }
 
+function normalizeThreadStatus(value: unknown): ThreadStatus {
+  if (value === 'paused' || value === 'completed' || value === 'archived') return value
+  return 'active'
+}
+
+function directoryForPath(candidatePath: string): string | null {
+  try {
+    const resolved = path.resolve(candidatePath)
+    const stats = fs.statSync(resolved)
+    return stats.isDirectory() ? resolved : path.dirname(resolved)
+  } catch {
+    return null
+  }
+}
+
+function safeGit(projectPath: string | undefined, args: string[]): string | undefined {
+  if (!projectPath) return undefined
+  const cwd = directoryForPath(projectPath)
+  if (!cwd) return undefined
+  try {
+    return execFileSync('git', ['-C', cwd, ...args], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim() || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function captureWorkspaceSnapshot(input: {
+  workspaceId?: string
+  projectName?: string
+  projectPath?: string
+}, existing?: Partial<ThreadWorkspaceSnapshot>): ThreadWorkspaceSnapshot {
+  const projectPath = normalizeString(existing?.projectPath) ?? normalizeString(input.projectPath)
+  return {
+    workspaceId: normalizeString(existing?.workspaceId) ?? normalizeString(input.workspaceId),
+    projectName: normalizeString(existing?.projectName) ?? normalizeString(input.projectName),
+    projectPath,
+    gitRemote: normalizeString(existing?.gitRemote) ?? safeGit(projectPath, ['remote', 'get-url', 'origin']),
+    gitBranch: normalizeString(existing?.gitBranch) ?? safeGit(projectPath, ['branch', '--show-current']),
+    gitCommit: normalizeString(existing?.gitCommit) ?? safeGit(projectPath, ['rev-parse', '--short', 'HEAD']),
+    capturedAt: normalizeString(existing?.capturedAt) ?? nowIso(),
+  }
+}
+
+function emptyResumeState(memory?: ConversationMemory, updatedAt = nowIso()): ThreadResumeState {
+  return {
+    userGoal: normalizeString(memory?.activeGoal),
+    currentState: normalizeString(memory?.summary),
+    decisions: normalizeStringArray(memory?.decisions),
+    constraints: [],
+    filesTouched: normalizeStringArray(memory?.filesTouched),
+    commandsRun: [],
+    testsRun: [],
+    blockers: [],
+    openQuestions: [],
+    nextSteps: [],
+    updatedAt,
+  }
+}
+
+function normalizeResumeState(value: unknown, memory?: ConversationMemory, updatedAt = nowIso()): ThreadResumeState {
+  if (!value || typeof value !== 'object') return emptyResumeState(memory, updatedAt)
+  const raw = value as Partial<ThreadResumeState>
+  return {
+    userGoal: normalizeString(raw.userGoal) ?? normalizeString(memory?.activeGoal),
+    currentState: normalizeString(raw.currentState) ?? normalizeString(memory?.summary),
+    decisions: normalizeStringArray(raw.decisions).length ? normalizeStringArray(raw.decisions) : normalizeStringArray(memory?.decisions),
+    constraints: normalizeStringArray(raw.constraints),
+    filesTouched: normalizeStringArray(raw.filesTouched).length ? normalizeStringArray(raw.filesTouched) : normalizeStringArray(memory?.filesTouched),
+    commandsRun: normalizeStringArray(raw.commandsRun),
+    testsRun: normalizeStringArray(raw.testsRun),
+    blockers: normalizeStringArray(raw.blockers),
+    openQuestions: normalizeStringArray(raw.openQuestions),
+    nextSteps: normalizeStringArray(raw.nextSteps),
+    updatedAt: normalizeString(raw.updatedAt) ?? updatedAt,
+    generatedFromMessageId: normalizeString(raw.generatedFromMessageId),
+  }
+}
+
+function normalizeStoredMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((message) => {
+    if (!message.streaming) return message
+    return {
+      ...message,
+      streaming: false,
+      error: message.error ?? 'Relay closed before this response completed.',
+    }
+  })
+}
+
 function normalizeConversation(conv: Conversation, fallbackProject = getDefaultProject()): Conversation {
+  const updatedAt = conv.updatedAt ?? conv.createdAt
+  const memory = conv.memory ?? {}
   return {
     ...conv,
-    updatedAt: conv.updatedAt ?? conv.createdAt,
+    messages: normalizeStoredMessages(conv.messages ?? []),
+    updatedAt,
+    status: normalizeThreadStatus(conv.status),
     projectName: conv.projectName ?? fallbackProject.name,
     projectPath: conv.projectPath ?? fallbackProject.projectPath,
+    workspaceSnapshot: captureWorkspaceSnapshot({
+      workspaceId: conv.workspaceId,
+      projectName: conv.projectName ?? fallbackProject.name,
+      projectPath: conv.projectPath ?? fallbackProject.projectPath,
+    }, conv.workspaceSnapshot),
     source: conv.source ?? 'relay',
     readOnly: conv.readOnly ?? false,
     mode: conv.mode ?? 'quick',
-    memory: conv.memory ?? {},
+    memory,
+    resumeState: normalizeResumeState(conv.resumeState, memory, updatedAt),
+    toolEventSummaries: Array.isArray(conv.toolEventSummaries) ? conv.toolEventSummaries : [],
   }
 }
 
@@ -146,6 +295,84 @@ function formatAttachments(attachments?: ContextAttachment[]): string {
   return attachments.map(item => `Context: ${item.title}\n${item.content}`).join('\n\n')
 }
 
+function listBlock(label: string, values: string[] | undefined): string {
+  if (!values?.length) return ''
+  return `${label}:\n${values.map(value => `- ${value}`).join('\n')}`
+}
+
+function formatWorkspaceSnapshot(snapshot?: ThreadWorkspaceSnapshot): string {
+  if (!snapshot) return ''
+  const lines = [
+    snapshot.projectName ? `- Project: ${snapshot.projectName}` : '',
+    snapshot.projectPath ? `- Path: ${snapshot.projectPath}` : '',
+    snapshot.gitBranch ? `- Branch at last update: ${snapshot.gitBranch}` : '',
+    snapshot.gitCommit ? `- Commit at last update: ${snapshot.gitCommit}` : '',
+  ].filter(Boolean)
+  return lines.length ? `Workspace:\n${lines.join('\n')}` : ''
+}
+
+function formatToolEventSummaries(conversation: Conversation): string {
+  const summaries = (conversation.toolEventSummaries ?? [])
+    .slice(-6)
+    .map((summary) => {
+      const suffix = summary.detail ? ` - ${summary.detail}` : ''
+      const status = summary.status ? ` [${summary.status}]` : ''
+      return `${summary.title}${status}${suffix}`
+    })
+  return listBlock('Known tool results', summaries)
+}
+
+function hasDurableResumeContext(conversation: Conversation): boolean {
+  const resume = conversation.resumeState
+  const hasPriorAssistantTurn = conversation.messages.some((message) => message.role === 'assistant' && !message.error)
+  const hasStructuredResume = !!(
+    resume?.currentState ||
+    resume?.decisions.length ||
+    resume?.constraints.length ||
+    resume?.filesTouched.length ||
+    resume?.commandsRun.length ||
+    resume?.testsRun.length ||
+    resume?.blockers.length ||
+    resume?.openQuestions.length ||
+    resume?.nextSteps.length
+  )
+  return !!(
+    conversation.memory?.summary ||
+    hasPriorAssistantTurn ||
+    hasStructuredResume ||
+    conversation.toolEventSummaries?.length ||
+    conversation.sourceConversationId ||
+    (conversation.status && conversation.status !== 'active')
+  )
+}
+
+function formatResumeContext(conversation: Conversation): string {
+  if (!hasDurableResumeContext(conversation)) return ''
+
+  const resume = normalizeResumeState(
+    conversation.resumeState,
+    conversation.memory,
+    conversation.updatedAt ?? conversation.createdAt,
+  )
+  const blocks = [
+    'Relay reconstructed this thread from durable local state so it can be continued later.',
+    formatWorkspaceSnapshot(conversation.workspaceSnapshot),
+    resume.userGoal ? `Goal:\n${resume.userGoal}` : '',
+    resume.currentState ? `Current state:\n${resume.currentState}` : '',
+    listBlock('Decisions', resume.decisions),
+    listBlock('Constraints', resume.constraints),
+    listBlock('Files touched', resume.filesTouched),
+    listBlock('Commands run', resume.commandsRun),
+    listBlock('Tests run', resume.testsRun),
+    listBlock('Blockers', resume.blockers),
+    listBlock('Open questions', resume.openQuestions),
+    formatToolEventSummaries(conversation),
+    listBlock('Next steps', resume.nextSteps),
+  ].filter(Boolean)
+
+  return blocks.length ? `Relay resume context:\n\n${blocks.join('\n\n')}` : ''
+}
+
 function uniqueValues(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))]
 }
@@ -189,10 +416,12 @@ function buildContextPacket(conv: Conversation, taskBrief: string, options: Send
     tokenEstimate: estimateTokens(message.content.slice(0, 2000)),
   }))
   const memory = conv.memory ?? {}
+  const resume = normalizeResumeState(conv.resumeState, memory, conv.updatedAt ?? conv.createdAt)
   const fileRefs = uniqueValues([
     ...extractFileReferences(taskBrief),
-    ...extractFileReferences(memory.summary ?? ''),
+    ...extractFileReferences(resume.currentState ?? memory.summary ?? ''),
     ...(memory.filesTouched ?? []),
+    ...(resume.filesTouched ?? []),
   ]).slice(0, 8)
   const files = fileRefs.map(filePath => readContextFile(conv.projectPath, filePath))
   const attachments = options.attachments ?? []
@@ -204,11 +433,11 @@ function buildContextPacket(conv: Conversation, taskBrief: string, options: Send
 
   const tokenEstimate = [
     taskBrief,
-    memory.activeGoal ?? '',
-    memory.summary ?? '',
+    resume.userGoal ?? memory.activeGoal ?? '',
+    resume.currentState ?? memory.summary ?? '',
     ...recentMessages.map(message => message.content),
     ...(memory.pinnedFacts ?? []),
-    ...(memory.decisions ?? []),
+    ...(resume.decisions.length ? resume.decisions : (memory.decisions ?? [])),
     ...files.map(file => file.contentPreview ?? ''),
     ...attachments.map(attachment => attachment.content),
     ...constraints,
@@ -218,11 +447,11 @@ function buildContextPacket(conv: Conversation, taskBrief: string, options: Send
     id: randomUUID(),
     createdAt: new Date().toISOString(),
     taskBrief,
-    activeGoal: memory.activeGoal,
-    conversationSummary: memory.summary,
+    activeGoal: resume.userGoal ?? memory.activeGoal,
+    conversationSummary: resume.currentState ?? memory.summary,
     relevantMessages: recentMessages,
     pinnedFacts: memory.pinnedFacts ?? [],
-    decisions: memory.decisions ?? [],
+    decisions: resume.decisions.length ? resume.decisions : (memory.decisions ?? []),
     files,
     attachments,
     constraints,
@@ -255,11 +484,15 @@ function formatContextPacket(packet: ContextPacket): string {
 }
 
 function buildSystemContext(conv: Conversation, options?: SendMessageOptions, contextPacket?: ContextPacket): string {
-  if (contextPacket) return formatContextPacket(contextPacket)
+  const resumeContext = formatResumeContext(conv)
+  if (contextPacket) {
+    return [resumeContext, formatContextPacket(contextPacket)].filter(Boolean).join('\n\n')
+  }
   const skillBlock = options?.skill
     ? `Active skill — ${options.skill.name} (${options.skill.provider}):\n\n${options.skill.body}`
     : ''
   const blocks = [
+    resumeContext,
     modeInstruction(options?.mode ?? conv.mode ?? 'quick'),
     skillBlock,
     formatMemory(conv.memory),
@@ -313,6 +546,42 @@ function compactMemory(messages: ChatMessage[], memory: ConversationMemory = {})
     filesTouched: [...files].slice(-20),
     updatedAt: new Date().toISOString(),
   }
+}
+
+function deriveResumeState(conversation: Conversation, messages: ChatMessage[] = conversation.messages): ThreadResumeState {
+  const current = normalizeResumeState(conversation.resumeState, conversation.memory, conversation.updatedAt ?? conversation.createdAt)
+  const latestAssistant = [...messages].reverse().find((message) => message.role === 'assistant' && !message.streaming && !message.error)
+  const latestUser = [...messages].reverse().find((message) => message.role === 'user')
+  const transcript = messages
+    .filter((message) => !message.streaming && !message.error)
+    .map((message) => message.content)
+    .join('\n')
+  const files = new Set([
+    ...current.filesTouched,
+    ...(conversation.memory?.filesTouched ?? []),
+    ...extractFileReferences(transcript),
+  ])
+
+  return {
+    ...current,
+    userGoal: current.userGoal ?? normalizeString(conversation.memory?.activeGoal) ?? normalizeString(latestUser?.content),
+    currentState: normalizeString(conversation.memory?.summary) ?? current.currentState ?? normalizeString(latestAssistant?.content),
+    decisions: current.decisions.length ? current.decisions : normalizeStringArray(conversation.memory?.decisions),
+    filesTouched: [...files].slice(-20),
+    updatedAt: nowIso(),
+    generatedFromMessageId: latestAssistant?.id ?? current.generatedFromMessageId,
+  }
+}
+
+function importedConversationSummary(conversation: Conversation): string {
+  const transcript = conversation.messages
+    .slice(-8)
+    .map((message) => `${message.role}: ${message.content}`)
+    .join('\n\n')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const prefix = `Imported ${conversation.source ?? 'external'} history from "${conversation.title}".`
+  return `${prefix}${transcript ? ` Recent context: ${transcript}` : ''}`.slice(-2400)
 }
 
 function importedRouting(model: string | undefined, provider: 'anthropic' | 'openai'): ChatMessage['routing'] | undefined {
@@ -396,71 +665,84 @@ function importClaudeConversations(): Conversation[] {
       }
     })
 
-  const conversations: Conversation[] = []
-
-  for (const filePath of files) {
-    const rows = safeReadJsonLines(filePath)
-    const messages: ChatMessage[] = []
-    let createdAt = ''
-    let updatedAt = ''
-    let title = ''
-    let projectPath = ''
-    let sessionId = path.basename(filePath, '.jsonl')
-
-    for (const row of rows) {
-      if (!row || typeof row !== 'object') continue
-      const record = row as {
-        type?: string
-        timestamp?: string
-        sessionId?: string
-        cwd?: string
-        message?: {
-          role?: 'user' | 'assistant'
-          content?: unknown
-          model?: string
-          usage?: ImportedUsage
-        }
-      }
-
-      if (record.sessionId) sessionId = record.sessionId
-      if (record.cwd && !projectPath) projectPath = record.cwd
-      if (record.timestamp && !createdAt) createdAt = record.timestamp
-      if (record.timestamp) updatedAt = record.timestamp
-
-      if (record.type !== 'user' && record.type !== 'assistant') continue
-      const role = record.message?.role
-      if (role !== 'user' && role !== 'assistant') continue
-
-      const text = extractClaudeText(record.message?.content)
-      if (!text) continue
-
-      if (!title && role === 'user') title = deriveTitle(text)
-      messages.push({
-        id: randomUUID(),
-        role,
-        content: text,
-        createdAt: record.timestamp,
-        routing: role === 'assistant' ? importedRouting(record.message?.model, 'anthropic') : undefined,
-        usage: role === 'assistant' ? normalizeImportedUsage(record.message?.usage) : undefined,
-      })
-    }
-
-    if (messages.length === 0) continue
-    const project = deriveProjectFromPath(projectPath)
-    conversations.push(normalizeConversation({
-      id: `claude:${sessionId}`,
-      title: title || 'Claude conversation',
-      messages,
-      createdAt: createdAt || updatedAt || new Date().toISOString(),
-      updatedAt: updatedAt || createdAt || new Date().toISOString(),
-      projectName: project.name,
-      projectPath: project.projectPath,
-      source: 'claude',
-      readOnly: true,
-    }))
+  const activeFiles = new Set(files)
+  for (const filePath of claudeImportCache.keys()) {
+    if (!activeFiles.has(filePath)) claudeImportCache.delete(filePath)
   }
 
-  return conversations
+  return files
+    .map((filePath) => {
+      const revision = revisionKey(fileRevision(filePath))
+      const cached = claudeImportCache.get(filePath)
+      if (cached?.revision === revision) return cached.conversation
+
+      const conversation = importClaudeConversation(filePath)
+      claudeImportCache.set(filePath, { revision, conversation })
+      return conversation
+    })
+    .filter((conversation): conversation is Conversation => !!conversation)
+}
+
+function importClaudeConversation(filePath: string): Conversation | null {
+  const rows = safeReadJsonLines(filePath)
+  const messages: ChatMessage[] = []
+  let createdAt = ''
+  let updatedAt = ''
+  let title = ''
+  let projectPath = ''
+  let sessionId = path.basename(filePath, '.jsonl')
+
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const record = row as {
+      type?: string
+      timestamp?: string
+      sessionId?: string
+      cwd?: string
+      message?: {
+        role?: 'user' | 'assistant'
+        content?: unknown
+        model?: string
+        usage?: ImportedUsage
+      }
+    }
+
+    if (record.sessionId) sessionId = record.sessionId
+    if (record.cwd && !projectPath) projectPath = record.cwd
+    if (record.timestamp && !createdAt) createdAt = record.timestamp
+    if (record.timestamp) updatedAt = record.timestamp
+
+    if (record.type !== 'user' && record.type !== 'assistant') continue
+    const role = record.message?.role
+    if (role !== 'user' && role !== 'assistant') continue
+
+    const text = extractClaudeText(record.message?.content)
+    if (!text) continue
+
+    if (!title && role === 'user') title = deriveTitle(text)
+    messages.push({
+      id: randomUUID(),
+      role,
+      content: text,
+      createdAt: record.timestamp,
+      routing: role === 'assistant' ? importedRouting(record.message?.model, 'anthropic') : undefined,
+      usage: role === 'assistant' ? normalizeImportedUsage(record.message?.usage) : undefined,
+    })
+  }
+
+  if (messages.length === 0) return null
+  const project = deriveProjectFromPath(projectPath)
+  return normalizeConversation({
+    id: `claude:${sessionId}`,
+    title: title || 'Claude conversation',
+    messages,
+    createdAt: createdAt || updatedAt || new Date().toISOString(),
+    updatedAt: updatedAt || createdAt || new Date().toISOString(),
+    projectName: project.name,
+    projectPath: project.projectPath,
+    source: 'claude',
+    readOnly: true,
+  })
 }
 
 function readCodexThreadRows(): CodexThreadRow[] {
@@ -481,19 +763,14 @@ function readCodexThreadRows(): CodexThreadRow[] {
 export function getCodexConversationRevision(): string {
   return readCodexThreadRows()
     .map((row) => {
-      let rolloutRevision = ''
-      try {
-        const stat = row.rollout_path ? fs.statSync(row.rollout_path) : null
-        rolloutRevision = stat ? `${stat.size}:${stat.mtimeMs}` : ''
-      } catch {
-        rolloutRevision = ''
-      }
+      const rolloutRevision = revisionKey(fileRevision(row.rollout_path))
 
       return [
         row.id,
         row.title,
         row.cwd,
         row.updated_at,
+        row.first_user_message,
         row.rollout_path,
         rolloutRevision,
       ].join('|')
@@ -596,8 +873,22 @@ function importCodexConversation(row: CodexThreadRow): Conversation | null {
 }
 
 function importCodexConversations(): Conversation[] {
-  return readCodexThreadRows()
-    .map(importCodexConversation)
+  const rows = readCodexThreadRows()
+  const activeIds = new Set(rows.map((row) => row.id))
+  for (const id of codexImportCache.keys()) {
+    if (!activeIds.has(id)) codexImportCache.delete(id)
+  }
+
+  return rows
+    .map((row) => {
+      const revision = codexRowRevision(row)
+      const cached = codexImportCache.get(row.id)
+      if (cached?.revision === revision) return cached.conversation
+
+      const conversation = importCodexConversation(row)
+      codexImportCache.set(row.id, { revision, conversation })
+      return conversation
+    })
     .filter((conv): conv is Conversation => !!conv)
 }
 
@@ -683,20 +974,39 @@ export function getConversations(terminals: TerminalSessionSnapshot[] = [], task
   return sortConversations([...readStore(), ...getExternalConversations(terminals, tasks)])
 }
 
-export function newConversation(): Conversation {
-  const project = getDefaultProject()
+export function newConversation(input: { workspaceId?: string; projectName?: string; projectPath?: string; preserveEmptyProject?: boolean } = {}): Conversation {
+  const project = input.preserveEmptyProject
+    ? {
+        name: input.projectName ?? 'General',
+        projectPath: undefined,
+      }
+    : input.projectPath
+    ? {
+        name: input.projectName ?? (path.basename(input.projectPath) || input.projectPath),
+        projectPath: input.projectPath,
+      }
+    : getDefaultProject()
   const conv: Conversation = {
     id: randomUUID(),
     title: 'New conversation',
     messages: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    status: 'active',
+    workspaceId: input.workspaceId,
     projectName: project.name,
     projectPath: project.projectPath,
+    workspaceSnapshot: captureWorkspaceSnapshot({
+      workspaceId: input.workspaceId,
+      projectName: project.name,
+      projectPath: project.projectPath,
+    }),
     source: 'relay',
     readOnly: false,
     mode: 'quick',
     memory: {},
+    resumeState: emptyResumeState(),
+    toolEventSummaries: [],
   }
   const store = readStore()
   store.unshift(conv)
@@ -708,6 +1018,90 @@ export function deleteConversation(id: string): void {
   writeStore(readStore().filter(c => c.id !== id))
 }
 
+export function updateThreadStatus(id: string, status: ThreadStatus): Conversation | null {
+  return updateConversation(id, c => {
+    const timestamp = nowIso()
+    return {
+      ...c,
+      status,
+      archivedAt: status === 'archived' ? timestamp : undefined,
+      completedAt: status === 'completed' ? timestamp : status === 'active' || status === 'paused' ? undefined : c.completedAt,
+      updatedAt: timestamp,
+      resumeState: {
+        ...normalizeResumeState(c.resumeState, c.memory, c.updatedAt ?? c.createdAt),
+        updatedAt: timestamp,
+      },
+    }
+  })
+}
+
+export function updateThreadResumeState(id: string, state: Partial<ThreadResumeState>): Conversation | null {
+  return updateConversation(id, c => ({
+    ...c,
+    resumeState: normalizeResumeState({
+      ...normalizeResumeState(c.resumeState, c.memory, c.updatedAt ?? c.createdAt),
+      ...state,
+      updatedAt: nowIso(),
+    }, c.memory),
+    updatedAt: nowIso(),
+  }))
+}
+
+export function cloneImportedConversation(sourceId: string): Conversation {
+  const source = getConversations().find((conversation) => conversation.id === sourceId)
+  if (!source) throw new Error('Source conversation not found.')
+
+  const createdAt = nowIso()
+  const summary = importedConversationSummary(source)
+  const memory: ConversationMemory = {
+    summary,
+    activeGoal: source.memory?.activeGoal,
+    decisions: source.memory?.decisions ?? [],
+    filesTouched: [
+      ...(source.memory?.filesTouched ?? []),
+      ...extractFileReferences(summary),
+    ].slice(-20),
+    updatedAt: createdAt,
+  }
+  const conv: Conversation = normalizeConversation({
+    id: randomUUID(),
+    title: source.title.startsWith('Continue: ') ? source.title : `Continue: ${source.title}`,
+    messages: [],
+    createdAt,
+    updatedAt: createdAt,
+    status: 'active',
+    workspaceId: source.workspaceId,
+    projectName: source.projectName,
+    projectPath: source.projectPath,
+    workspaceSnapshot: captureWorkspaceSnapshot(source),
+    source: 'relay',
+    readOnly: false,
+    mode: source.mode ?? 'quick',
+    memory,
+    resumeState: {
+      ...emptyResumeState(memory, createdAt),
+      currentState: summary,
+      nextSteps: ['Continue from imported history.'],
+      updatedAt: createdAt,
+    },
+    toolEventSummaries: [{
+      id: randomUUID(),
+      kind: 'external',
+      title: `Cloned ${source.source ?? 'external'} history`,
+      detail: source.title,
+      status: 'succeeded',
+      createdAt,
+      relatedId: source.id,
+    }],
+    sourceConversationId: source.id,
+  })
+
+  const store = readStore()
+  store.unshift(conv)
+  writeStore(store)
+  return conv
+}
+
 export function updateConversationMemory(id: string, memory: ConversationMemory): Conversation | null {
   return updateConversation(id, c => ({
     ...c,
@@ -716,6 +1110,7 @@ export function updateConversationMemory(id: string, memory: ConversationMemory)
       ...memory,
       updatedAt: new Date().toISOString(),
     },
+    resumeState: deriveResumeState({ ...c, memory: { ...(c.memory ?? {}), ...memory } }),
     updatedAt: new Date().toISOString(),
   }))
 }
@@ -724,6 +1119,7 @@ export function compactConversation(id: string): Conversation | null {
   return updateConversation(id, c => ({
     ...c,
     memory: compactMemory(c.messages, c.memory),
+    resumeState: deriveResumeState({ ...c, memory: compactMemory(c.messages, c.memory) }),
     updatedAt: new Date().toISOString(),
   }))
 }
@@ -778,13 +1174,17 @@ export async function sendMessage(
 ): Promise<void> {
   // Add user message
   const userMsg: ChatMessage = { id: randomUUID(), role: 'user', content, createdAt: new Date().toISOString() }
-  let conv = updateConversation(conversationId, c => ({
-    ...c,
-    mode: options.mode ?? c.mode ?? 'quick',
-    title: c.messages.length === 0 ? deriveTitle(content) : c.title,
-    messages: [...c.messages, userMsg],
-    updatedAt: new Date().toISOString(),
-  }))
+  let conv = updateConversation(conversationId, c => {
+    const messages = [...c.messages, userMsg]
+    return {
+      ...c,
+      mode: options.mode ?? c.mode ?? 'quick',
+      title: c.messages.length === 0 ? deriveTitle(content) : c.title,
+      messages,
+      resumeState: deriveResumeState({ ...c, messages }, messages),
+      updatedAt: new Date().toISOString(),
+    }
+  })
   if (!conv) return
 
   // Route — pass connection state for all free providers
@@ -860,10 +1260,12 @@ export async function sendMessage(
     }
     updateConversation(conversationId, c => {
       const messages = c.messages.map(m => m.id === assistantId ? finalMsg : m)
+      const memory = messages.length > 14 ? compactMemory(messages, c.memory) : c.memory
       return {
         ...c,
-        memory: messages.length > 14 ? compactMemory(messages, c.memory) : c.memory,
-        updatedAt: new Date().toISOString(),
+        memory,
+        resumeState: deriveResumeState({ ...c, memory }, messages),
+        updatedAt: nowIso(),
         messages,
       }
     })

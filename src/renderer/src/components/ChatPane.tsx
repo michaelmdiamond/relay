@@ -6,7 +6,7 @@ import { UsageDashboard } from './UsageDashboard'
 import { ConnectionsDashboard } from './ConnectionsDashboard'
 import { useChatStore } from '../store/chat'
 import { CODEX_MODELS } from '../../../shared/types'
-import type { ChatMessage, Conversation, ConversationMemory, CursorModelOption, DeepSeekModel, GeminiModel, SendMessageOptions, TaskState } from '../../../shared/types'
+import type { ChatMessage, Conversation, ConversationMemory, CursorModelOption, DeepSeekModel, GeminiModel, SendMessageOptions, TaskState, ThreadStatus } from '../../../shared/types'
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat('en-US').format(value)
@@ -54,15 +54,10 @@ function listToLines(value?: string[]): string {
 function MemoryPanel({
   memory,
   onSave,
-  onCompact,
-  onPromoteToTask,
 }: {
   memory: ConversationMemory
   onSave: (memory: ConversationMemory) => void
-  onCompact: () => void
-  onPromoteToTask: () => void
 }) {
-  const [open, setOpen] = useState(false)
   const [activeGoal, setActiveGoal] = useState(memory.activeGoal ?? '')
   const [pinnedFacts, setPinnedFacts] = useState(listToLines(memory.pinnedFacts))
   const [decisions, setDecisions] = useState(listToLines(memory.decisions))
@@ -82,60 +77,32 @@ function MemoryPanel({
   }
 
   return (
-    <div style={{
-      borderBottom: '1px solid rgba(255,255,255,0.06)',
-      background: 'rgba(255,255,255,0.025)',
-      padding: '10px 16px',
-    }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          onClick={() => setOpen(v => !v)}
-          style={{
-            border: '1px solid rgba(255,255,255,0.09)',
-            borderRadius: 8,
-            background: 'rgba(255,255,255,0.05)',
-            color: '#e2e8f0',
-            padding: '6px 9px',
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          Memory
-        </button>
-        {memory.summary && (
-          <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12 }}>
-            Summary active · ~{Math.ceil(memory.summary.length / 4).toLocaleString()} tokens
-          </span>
-        )}
-        <button type="button" onClick={onCompact} style={smallActionStyle}>Compact now</button>
-        <button type="button" onClick={onPromoteToTask} style={smallActionStyle}>Promote to task</button>
-      </div>
-      {open && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginTop: 10 }}>
-          <label style={memoryLabelStyle}>
-            Active goal
-            <textarea value={activeGoal} onChange={e => setActiveGoal(e.target.value)} rows={4} style={memoryTextStyle} />
-          </label>
-          <label style={memoryLabelStyle}>
-            Pinned facts
-            <textarea value={pinnedFacts} onChange={e => setPinnedFacts(e.target.value)} rows={4} style={memoryTextStyle} />
-          </label>
-          <label style={memoryLabelStyle}>
-            Decisions
-            <textarea value={decisions} onChange={e => setDecisions(e.target.value)} rows={4} style={memoryTextStyle} />
-          </label>
-          {memory.summary && (
-            <div style={{ gridColumn: '1 / -1', color: 'rgba(255,255,255,0.48)', fontSize: 12, lineHeight: 1.5 }}>
-              {memory.summary}
-            </div>
-          )}
-          <div style={{ gridColumn: '1 / -1' }}>
-            <button type="button" onClick={save} style={smallActionStyle}>Save memory</button>
-          </div>
+    <div className="thread-drawer__memory">
+      {memory.summary && (
+        <div className="thread-drawer__memory-summary">
+          Summary active · ~{Math.ceil(memory.summary.length / 4).toLocaleString()} tokens
         </div>
       )}
+      <div style={{ display: 'grid', gap: 8, marginBottom: 10 }}>
+        <label style={memoryLabelStyle}>
+          Active goal
+          <textarea value={activeGoal} onChange={e => setActiveGoal(e.target.value)} rows={3} style={memoryTextStyle} />
+        </label>
+        <label style={memoryLabelStyle}>
+          Pinned facts
+          <textarea value={pinnedFacts} onChange={e => setPinnedFacts(e.target.value)} rows={3} style={memoryTextStyle} />
+        </label>
+        <label style={memoryLabelStyle}>
+          Decisions
+          <textarea value={decisions} onChange={e => setDecisions(e.target.value)} rows={3} style={memoryTextStyle} />
+        </label>
+      </div>
+      {memory.summary && (
+        <div style={{ color: 'rgba(255,255,255,0.48)', fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
+          {memory.summary}
+        </div>
+      )}
+      <button type="button" onClick={save} style={smallActionStyle}>Save memory</button>
     </div>
   )
 }
@@ -145,17 +112,202 @@ function latestUserMessage(conversation: Conversation): string {
 }
 
 function promotionDefaults(conversation: Conversation): { title: string; brief: string } {
-  const activeGoal = conversation.memory?.activeGoal?.trim()
+  const activeGoal = conversation.resumeState?.userGoal?.trim() || conversation.memory?.activeGoal?.trim()
   const latestUser = latestUserMessage(conversation).trim()
-  const summary = conversation.memory?.summary?.trim()
+  const summary = conversation.resumeState?.currentState?.trim() || conversation.memory?.summary?.trim()
+  const nextSteps = conversation.resumeState?.nextSteps?.length
+    ? `Next steps:\n${conversation.resumeState.nextSteps.map((step) => `- ${step}`).join('\n')}`
+    : ''
   const titleSource = activeGoal || latestUser || conversation.title
   const title = titleSource.split('\n')[0].slice(0, 72) || 'Untitled task'
   const brief = [
     activeGoal,
     latestUser && latestUser !== activeGoal ? latestUser : '',
     summary ? `Context summary: ${summary}` : '',
+    nextSteps,
   ].filter(Boolean).join('\n\n')
   return { title, brief }
+}
+
+function formatDateTime(value?: string): string {
+  if (!value) return 'unknown'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'unknown'
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function threadStatusLabel(status: ThreadStatus | undefined): string {
+  if (status === 'paused') return 'Paused'
+  if (status === 'completed') return 'Completed'
+  if (status === 'archived') return 'Archived'
+  return 'Active'
+}
+
+function hasVisibleContinuity(conversation: Conversation): boolean {
+  const resume = conversation.resumeState
+  return !!(
+    resume?.currentState?.trim() ||
+    resume?.nextSteps?.length ||
+    (resume?.userGoal?.trim() && resume.userGoal.trim() !== conversation.title.trim())
+  )
+}
+
+function ChatHeader({
+  conversation,
+  onOpenDrawer,
+}: {
+  conversation: Conversation
+  onOpenDrawer: () => void
+}) {
+  return (
+    <div className="chat-header">
+      <span className="chat-header__title">{conversation.title}</span>
+      {conversation.readOnly && <span className="chat-header__imported">Imported</span>}
+      <button type="button" className="chat-header__drawer-btn" onClick={onOpenDrawer} title="Thread details">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="m8 5 5 5-5 5" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
+function ThreadDrawer({
+  conversation,
+  open,
+  onClose,
+  saving,
+  onStatusChange,
+  onContinueImport,
+  onPromoteToTask,
+  onMemorySave,
+  onCompact,
+}: {
+  conversation: Conversation
+  open: boolean
+  onClose: () => void
+  saving: boolean
+  onStatusChange: (status: ThreadStatus) => void
+  onContinueImport: () => void
+  onPromoteToTask: () => void
+  onMemorySave: (memory: ConversationMemory) => void
+  onCompact: () => void
+}) {
+  const readOnly = !!conversation.readOnly
+  const status = conversation.status ?? 'active'
+  const resume = conversation.resumeState
+  const workspace = conversation.workspaceSnapshot
+
+  return (
+    <div className={`thread-drawer${open ? ' is-open' : ''}`} aria-hidden={!open}>
+      <div className="thread-drawer__head">
+        <span className="thread-drawer__head-title">Thread</span>
+        <button type="button" className="thread-drawer__close" onClick={onClose} title="Close">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+        </button>
+      </div>
+
+      <div className="thread-drawer__body">
+        <div className="thread-drawer__section">
+          <div className="thread-drawer__conv-title">{resume?.userGoal || conversation.title}</div>
+          <div className="thread-drawer__meta">
+            <span className={`thread-drawer__status-badge thread-drawer__status-badge--${readOnly ? 'imported' : status}`}>
+              {readOnly ? 'Imported' : threadStatusLabel(status)}
+            </span>
+            <span>{formatDateTime(conversation.updatedAt ?? conversation.createdAt)}</span>
+          </div>
+          {(workspace?.gitBranch || workspace?.gitCommit) && (
+            <div className="thread-drawer__git">
+              {workspace.gitBranch && <span>{workspace.gitBranch}</span>}
+              {workspace.gitCommit && <span>@ {workspace.gitCommit.slice(0, 7)}</span>}
+            </div>
+          )}
+          {readOnly && conversation.source && (
+            <div className="thread-drawer__import-note">
+              {conversation.source === 'codex'
+                ? 'Imported from Codex. Relay syncs this transcript from local history; it stays read-only here.'
+                : `Imported from ${conversation.source}. This transcript is read-only.`}
+              {conversation.externalLink?.terminalName && (
+                <span> Linked to terminal <strong>{conversation.externalLink.terminalName}</strong>
+                  {conversation.externalLink.taskTitle ? ` for task "${conversation.externalLink.taskTitle}"` : ''}.
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="thread-drawer__section">
+          <div className="thread-drawer__actions">
+            {readOnly ? (
+              <>
+                <button type="button" className="thread-drawer__action-btn thread-drawer__action-btn--primary" onClick={onContinueImport} disabled={saving}>
+                  {saving ? 'Creating...' : 'Continue in Relay'}
+                </button>
+                <button type="button" className="thread-drawer__action-btn" onClick={onPromoteToTask}>
+                  Promote to task
+                </button>
+              </>
+            ) : (
+              <>
+                {status === 'active' ? (
+                  <>
+                    <button type="button" className="thread-drawer__action-btn" onClick={() => onStatusChange('paused')} disabled={saving}>Pause</button>
+                    <button type="button" className="thread-drawer__action-btn" onClick={() => onStatusChange('completed')} disabled={saving}>Mark complete</button>
+                  </>
+                ) : (
+                  <button type="button" className="thread-drawer__action-btn" onClick={() => onStatusChange('active')} disabled={saving}>Resume</button>
+                )}
+                {status !== 'archived' && (
+                  <button type="button" className="thread-drawer__action-btn" onClick={() => onStatusChange('archived')} disabled={saving}>Archive</button>
+                )}
+                <button type="button" className="thread-drawer__action-btn" onClick={onPromoteToTask}>Promote to task</button>
+                <button type="button" className="thread-drawer__action-btn" onClick={onCompact}>Compact memory</button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {hasVisibleContinuity(conversation) && (
+          <div className="thread-drawer__section">
+            {resume?.userGoal && resume.userGoal !== conversation.title && (
+              <div className="thread-drawer__field">
+                <div className="thread-drawer__field-label">Goal</div>
+                <div className="thread-drawer__field-value">{resume.userGoal}</div>
+              </div>
+            )}
+            {resume?.currentState && (
+              <div className="thread-drawer__field">
+                <div className="thread-drawer__field-label">Current state</div>
+                <div className="thread-drawer__field-value">{resume.currentState}</div>
+              </div>
+            )}
+            {!!resume?.nextSteps?.length && (
+              <div className="thread-drawer__field">
+                <div className="thread-drawer__field-label">Next steps</div>
+                <ul className="thread-drawer__steps">
+                  {resume.nextSteps.slice(0, 3).map(step => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!readOnly && (
+          <div className="thread-drawer__section">
+            <div className="thread-drawer__section-label">Memory</div>
+            <MemoryPanel memory={conversation.memory ?? {}} onSave={onMemorySave} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function PromoteTaskModal({
@@ -250,8 +402,14 @@ const memoryTextStyle: CSSProperties = {
   lineHeight: 1.45,
 }
 
-export function ChatPane({ onOpenTerminals }: { onOpenTerminals?: () => void }) {
-  const { conversations, activeId, activePane, modelChoice, sending, setModelChoice, setSending, replaceConversation } = useChatStore()
+export function ChatPane({
+  onOpenTerminals,
+  visible = true,
+}: {
+  onOpenTerminals?: () => void
+  visible?: boolean
+}) {
+  const { conversations, activeId, activePane, modelChoice, sending, setModelChoice, setSending, setActiveId, replaceConversation, prependConversation } = useChatStore()
   const [codexModel, setCodexModelState] = useState<string>(CODEX_MODELS[0])
   const [codexModels, setCodexModels] = useState<string[]>([...CODEX_MODELS])
   const [geminiModel, setGeminiModelState] = useState<GeminiModel>('gemini-2.5-flash')
@@ -269,9 +427,11 @@ export function ChatPane({ onOpenTerminals }: { onOpenTerminals?: () => void }) 
   const [promoteState, setPromoteState] = useState<TaskState>('idea')
   const [promoteSaving, setPromoteSaving] = useState(false)
   const [promoteStatus, setPromoteStatus] = useState('')
+  const [threadSaving, setThreadSaving] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const conversation = conversations.find(c => c.id === activeId)
-  const bottomRef = useRef<HTMLDivElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
+  const restoringScrollRef = useRef(false)
   const [autoFollow, setAutoFollow] = useState(true)
   const usageSummary = conversation ? buildUsageSummary(conversation.messages) : []
   const readOnly = !!conversation?.readOnly
@@ -353,16 +513,36 @@ export function ChatPane({ onOpenTerminals }: { onOpenTerminals?: () => void }) 
     await window.api.setCursorModel(model)
   }
 
+  function scrollToLatest(behavior: ScrollBehavior = 'auto', restoring = false) {
+    if (restoring) restoringScrollRef.current = true
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const messages = messagesRef.current
+        if (!messages) {
+          restoringScrollRef.current = false
+          return
+        }
+        messages.scrollTo({ top: messages.scrollHeight, behavior })
+        if (restoring) {
+          requestAnimationFrame(() => {
+            restoringScrollRef.current = false
+          })
+        }
+      })
+    })
+  }
+
   useEffect(() => {
     setAutoFollow(true)
   }, [activeId])
 
   useEffect(() => {
-    if (!autoFollow) return
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [autoFollow, conversation?.messages.length, conversation?.messages.at(-1)?.content])
+    if (!visible || !autoFollow) return
+    scrollToLatest('auto', true)
+  }, [activeId, visible, autoFollow, conversation?.messages.length, conversation?.messages.at(-1)?.content])
 
   function handleMessagesScroll() {
+    if (restoringScrollRef.current) return
     const el = messagesRef.current
     if (!el) return
     const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight)
@@ -372,7 +552,7 @@ export function ChatPane({ onOpenTerminals }: { onOpenTerminals?: () => void }) 
 
   function jumpToLatest() {
     setAutoFollow(true)
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    scrollToLatest('smooth')
   }
 
   useEffect(() => {
@@ -457,6 +637,29 @@ export function ChatPane({ onOpenTerminals }: { onOpenTerminals?: () => void }) 
     }
   }
 
+  async function handleThreadStatusChange(status: ThreadStatus) {
+    if (!conversation || conversation.readOnly || threadSaving) return
+    setThreadSaving(true)
+    try {
+      const next = await window.api.updateThreadStatus(conversation.id, status)
+      if (next) replaceConversation(next)
+    } finally {
+      setThreadSaving(false)
+    }
+  }
+
+  async function handleContinueImported() {
+    if (!conversation || !conversation.readOnly || threadSaving) return
+    setThreadSaving(true)
+    try {
+      const next = await window.api.cloneImportedConversation(conversation.id)
+      prependConversation(next)
+      setActiveId(next.id)
+    } finally {
+      setThreadSaving(false)
+    }
+  }
+
   if (activePane === 'usage') {
     return <UsageDashboard conversations={conversations} />
   }
@@ -481,52 +684,20 @@ export function ChatPane({ onOpenTerminals }: { onOpenTerminals?: () => void }) 
   }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {readOnly && conversation && (
-        <div className="chat-import-banner">
-          <div className="chat-import-banner__copy">
-            <strong>{conversation.source === 'codex' ? 'Imported from Codex.' : `Imported from ${conversation.source}.`}</strong>
-            <span>
-              {conversation.source === 'codex'
-                ? 'Relay refreshes this transcript from local Codex history; it remains read-only here.'
-                : 'This transcript is read-only history.'}
-            </span>
-            {conversation.source === 'codex' && conversation.externalLink?.terminalName && (
-              <span className="chat-import-banner__linkage">
-                Linked to Relay terminal <strong>{conversation.externalLink.terminalName}</strong>
-                {conversation.externalLink.taskTitle ? ` for task "${conversation.externalLink.taskTitle}"` : ''}.
-              </span>
-            )}
-          </div>
-          {conversation.source === 'codex' && conversation.externalLink?.terminalSessionId && (
-            <button type="button" className="chat-import-banner__action" onClick={onOpenTerminals}>
-              Open terminal
-            </button>
-          )}
-        </div>
-      )}
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      <ChatHeader conversation={conversation} onOpenDrawer={() => setDrawerOpen(true)} />
 
-      {!readOnly && conversation && (
-        <MemoryPanel
-          memory={conversation.memory ?? {}}
-          onSave={handleMemorySave}
-          onCompact={handleCompact}
-          onPromoteToTask={openPromotion}
-        />
-      )}
-
-      {readOnly && conversation && (
-        <div className="chat-task-strip">
-          <button type="button" onClick={openPromotion}>Promote to task</button>
-          {promoteStatus && <span>{promoteStatus}</span>}
-        </div>
-      )}
-
-      {!readOnly && promoteStatus && (
-        <div className="chat-task-strip chat-task-strip--status">
-          <span>{promoteStatus}</span>
-        </div>
-      )}
+      <ThreadDrawer
+        conversation={conversation}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        saving={threadSaving}
+        onStatusChange={(status) => void handleThreadStatusChange(status)}
+        onContinueImport={() => void handleContinueImported()}
+        onPromoteToTask={openPromotion}
+        onMemorySave={handleMemorySave}
+        onCompact={handleCompact}
+      />
 
       {promoteOpen && (
         <PromoteTaskModal
@@ -625,7 +796,6 @@ export function ChatPane({ onOpenTerminals }: { onOpenTerminals?: () => void }) 
             </button>
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {!readOnly ? (
@@ -661,7 +831,7 @@ export function ChatPane({ onOpenTerminals }: { onOpenTerminals?: () => void }) 
           color: 'rgba(255,255,255,0.38)',
           fontSize: 12,
         }}>
-          Start a new Relay chat to continue working from this history.
+          Use Continue in Relay to create an editable thread from this history.
         </div>
       )}
     </div>

@@ -502,7 +502,7 @@ export function getWorkflowRuns(): WorkflowRun[] {
   return readStore().workflowRuns
 }
 
-export function startWorkflowRun(workflowId: string, goal: string): WorkflowRun {
+export function startWorkflowRun(workflowId: string, goal: string, workspaceId?: string): WorkflowRun {
   const store = readStore()
   const workflow = store.workflowDefinitions.find((item) => item.id === workflowId)
   if (!workflow) throw new Error('Workflow definition not found.')
@@ -512,6 +512,7 @@ export function startWorkflowRun(workflowId: string, goal: string): WorkflowRun 
     workflowId: workflow.id,
     workflowName: workflow.name,
     goal: goal.trim(),
+    workspaceId,
     status: 'queued',
     createdAt: nowIso(),
     updatedAt: nowIso(),

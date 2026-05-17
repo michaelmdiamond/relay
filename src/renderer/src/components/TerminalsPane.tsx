@@ -246,7 +246,7 @@ function TerminalView({ session, visible, focused, onFocus }: TerminalViewProps)
     let bufferReplayed = false
     let bufferSequence = 0
     const pendingData: Array<{ data: string; sequence: number }> = []
-    window.terminalApi.createTerminal(session.id, session.launcherId, session.name, session.cwd)
+    window.terminalApi.createTerminal(session.id, session.launcherId, session.name, session.cwd, session.taskId, session.workspaceId)
       .then(() => window.terminalApi.getTerminalBuffer(session.id))
       .then((buffer) => {
         if (disposed) return
@@ -420,19 +420,68 @@ function TerminalView({ session, visible, focused, onFocus }: TerminalViewProps)
   )
 }
 
-export function TerminalsPane({ visible = true }: { visible?: boolean }) {
+export function TerminalsPane({
+  visible = true,
+  workspaceId,
+  workspaceKind,
+  workspaceProjectPath,
+  repoWorkspacePaths = [],
+}: {
+  visible?: boolean
+  workspaceId?: string | null
+  workspaceKind?: 'repo' | 'general'
+  workspaceProjectPath?: string
+  repoWorkspacePaths?: string[]
+}) {
   const [selectedId, setSelectedId] = useState<TerminalLauncherId>('codex')
   const [sessions, setSessions] = useState<TerminalSessionSnapshot[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [visibleSessionIds, setVisibleSessionIds] = useState<Set<string>>(new Set())
   const [cwd, setCwd] = useState<string | null>(null)
   const [launchError, setLaunchError] = useState('')
+  const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false)
+  const createMenuRef = useRef<HTMLDivElement>(null)
+  const layoutMenuRef = useRef<HTMLDivElement>(null)
 
   const selectedLauncher = useMemo(
     () => launchers.find((l) => l.id === selectedId) ?? launchers[0],
     [selectedId],
   )
+  const defaultCwd = workspaceKind === 'repo' ? workspaceProjectPath ?? null : null
+  const effectiveCwd = cwd ?? defaultCwd
+  const folderLabel = effectiveCwd ? effectiveCwd.split('/').at(-1) : 'Choose folder'
   const uniqueSessions = useMemo(() => dedupeSessions(sessions), [sessions])
+  const workspaceSessions = useMemo(() => uniqueSessions.filter((session) => {
+    if (!workspaceId) return true
+    if (session.workspaceId === workspaceId) return true
+    if (workspaceKind === 'repo' && workspaceProjectPath && session.cwd) {
+      return session.cwd === workspaceProjectPath || session.cwd.startsWith(`${workspaceProjectPath}/`)
+    }
+    if (workspaceKind === 'general') {
+      return !session.cwd || !repoWorkspacePaths.some((repoPath) => (
+        session.cwd === repoPath || session.cwd.startsWith(`${repoPath}/`)
+      ))
+    }
+    return false
+  }), [uniqueSessions, workspaceId, workspaceKind, workspaceProjectPath, repoWorkspacePaths])
+
+  useEffect(() => {
+    setActiveSessionId((current) => {
+      if (current && workspaceSessions.some((session) => session.id === current)) return current
+      return workspaceSessions[0]?.id ?? null
+    })
+    setVisibleSessionIds((current) => {
+      const workspaceIds = new Set(workspaceSessions.map((session) => session.id))
+      const next = new Set([...current].filter((id) => workspaceIds.has(id)))
+      if (next.size === 0 && workspaceSessions[0]) next.add(workspaceSessions[0].id)
+      return next
+    })
+  }, [workspaceSessions])
+
+  useEffect(() => {
+    setCwd(null)
+  }, [workspaceId, workspaceProjectPath])
 
   useEffect(() => {
     let canceled = false
@@ -463,6 +512,29 @@ export function TerminalsPane({ visible = true }: { visible?: boolean }) {
     }
   }, [])
 
+  useEffect(() => {
+    if (!createMenuOpen && !layoutMenuOpen) return
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node
+      if (createMenuOpen && !createMenuRef.current?.contains(target)) setCreateMenuOpen(false)
+      if (layoutMenuOpen && !layoutMenuRef.current?.contains(target)) setLayoutMenuOpen(false)
+    }
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      setCreateMenuOpen(false)
+      setLayoutMenuOpen(false)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [createMenuOpen, layoutMenuOpen])
+
   async function handlePickDirectory() {
     const dir = await window.terminalApi.selectDirectory()
     if (dir) setCwd(dir)
@@ -470,17 +542,20 @@ export function TerminalsPane({ visible = true }: { visible?: boolean }) {
 
   async function handleLaunchSession() {
     setLaunchError('')
-    const nextIndex = uniqueSessions.filter((s) => s.launcherId === selectedLauncher.id).length + 1
+    const nextIndex = workspaceSessions.filter((s) => s.launcherId === selectedLauncher.id).length + 1
     try {
       const session = await window.terminalApi.createTerminal(
         `${selectedLauncher.id}-${crypto.randomUUID()}`,
         selectedLauncher.id,
         `${selectedLauncher.sessionLabel} ${nextIndex}`,
-        cwd ?? undefined,
+        effectiveCwd ?? undefined,
+        undefined,
+        workspaceId ?? undefined,
       )
       setSessions((current) => upsertSession(current, session))
       setActiveSessionId(session.id)
       setVisibleSessionIds((current) => new Set([...current, session.id]))
+      setCreateMenuOpen(false)
     } catch (error) {
       setLaunchError(error instanceof Error ? error.message : String(error))
     }
@@ -508,7 +583,7 @@ export function TerminalsPane({ visible = true }: { visible?: boolean }) {
   }
 
   function handleSoloSession() {
-    const targetSessionId = activeSessionId && uniqueSessions.some((session) => session.id === activeSessionId)
+    const targetSessionId = activeSessionId && workspaceSessions.some((session) => session.id === activeSessionId)
       ? activeSessionId
       : visibleSessions[0]?.id
     if (!targetSessionId) return
@@ -516,7 +591,7 @@ export function TerminalsPane({ visible = true }: { visible?: boolean }) {
   }
 
   function handleTileAll() {
-    setVisibleSessionIds(new Set(uniqueSessions.map((session) => session.id)))
+    setVisibleSessionIds(new Set(workspaceSessions.map((session) => session.id)))
   }
 
   function handleHideSession(sessionId: string, event: MouseEvent) {
@@ -529,72 +604,144 @@ export function TerminalsPane({ visible = true }: { visible?: boolean }) {
     })
   }
 
-  const visibleSessions = uniqueSessions.filter((session) => visibleSessionIds.has(session.id))
+  const visibleSessions = workspaceSessions.filter((session) => visibleSessionIds.has(session.id))
 
   return (
     <div className="terminals-view">
-      <aside className="terminals-sidebar">
-        <div className="terminals-sidebar__header">
-          <div className="terminals-sidebar__title">Launchers</div>
-        </div>
-
-        {launchers.map((launcher) => (
-          <button
-            key={launcher.id}
-            type="button"
-            className={`terminal-tab ${launcher.id === selectedId ? 'active' : ''}`}
-            onClick={() => setSelectedId(launcher.id)}
-          >
-            <span className="tab-name">{launcher.name}</span>
-            <span className="tab-status">{launcher.status}</span>
-          </button>
-        ))}
-      </aside>
-
       <section className="terminals-body">
         <div className="terminal-tabs-bar">
-          <div className="terminal-session-tabs">
-            {uniqueSessions.map((session) => {
-              const isVisible = visibleSessionIds.has(session.id)
-              return (
-                <button
-                  key={session.id}
-                  type="button"
-                  className={`terminal-session-tab${isVisible ? ' active is-visible' : ''}${session.id === activeSessionId ? ' is-focused' : ''}`}
-                  onClick={() => handleSelectSession(session.id)}
-                  title={session.cwd ? `${session.name} - ${session.cwd}` : session.name}
-                >
-                  <span
-                    className="terminal-session-tab__visibility"
-                    title={isVisible ? 'Hide from workspace' : 'Show in workspace'}
-                    onClick={(event) => {
-                      if (isVisible) handleHideSession(session.id, event)
-                    }}
-                  />
-                  <span className="terminal-session-tab__label">
-                    <span className="terminal-session-tab__name">{session.name}</span>
-                    {session.cwd && <span className="terminal-session-tab__cwd">{session.cwd.split('/').at(-1)}</span>}
-                  </span>
-                  <span
-                    className="terminal-session-tab__close"
-                    title={`Close ${session.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      handleCloseSession(session.id)
-                    }}
+          <div className="terminal-tabs-bar__sessions">
+            <div className="terminal-session-tabs">
+              {workspaceSessions.map((session) => {
+                const isVisible = visibleSessionIds.has(session.id)
+                return (
+                  <button
+                    key={session.id}
+                    type="button"
+                    className={`terminal-session-tab${isVisible ? ' active is-visible' : ''}${session.id === activeSessionId ? ' is-focused' : ''}`}
+                    onClick={() => handleSelectSession(session.id)}
+                    title={session.cwd ? `${session.name} - ${session.cwd}` : session.name}
                   >
-                    ×
-                  </span>
-                </button>
-              )
-            })}
+                    <span
+                      className="terminal-session-tab__visibility"
+                      title={isVisible ? 'Hide from workspace' : 'Show in workspace'}
+                      onClick={(event) => {
+                        if (isVisible) handleHideSession(session.id, event)
+                      }}
+                    />
+                    <span className="terminal-session-tab__label">
+                      <span className="terminal-session-tab__name">{session.name}</span>
+                      {session.cwd && <span className="terminal-session-tab__cwd">{session.cwd.split('/').at(-1)}</span>}
+                    </span>
+                    <span
+                      className="terminal-session-tab__close"
+                      title={`Close ${session.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        handleCloseSession(session.id)
+                      }}
+                    >
+                      ×
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
-          <div className="terminal-tabs-actions">
-            <button type="button" onClick={handleSoloSession} disabled={visibleSessions.length <= 1}>Solo</button>
-            <button type="button" onClick={handleTileAll} disabled={uniqueSessions.length <= 1 || visibleSessionIds.size === uniqueSessions.length}>Tile all</button>
-            <button type="button" onClick={handlePickDirectory}>{cwd ? cwd.split('/').at(-1) : 'Folder'}</button>
-            <button type="button" onClick={handleLaunchSession}>+ {selectedLauncher.name}</button>
-            {cwd && <button type="button" onClick={() => setCwd(null)}>Clear</button>}
+          <div className="terminal-header-actions">
+            <div ref={createMenuRef} className="terminal-toolbar-menu">
+              <button
+                type="button"
+                className="terminal-toolbar-primary"
+                aria-haspopup="dialog"
+                aria-expanded={createMenuOpen}
+                onClick={() => {
+                  setCreateMenuOpen((value) => !value)
+                  setLayoutMenuOpen(false)
+                }}
+              >
+                + New agent
+              </button>
+              {createMenuOpen && (
+                <div className="terminal-toolbar-popover terminal-create-popover" role="dialog" aria-label="Create terminal session">
+                  <label className="terminal-agent-form__field">
+                    <span>Agent</span>
+                    <select value={selectedId} onChange={(event) => setSelectedId(event.target.value as TerminalLauncherId)}>
+                      {launchers.map((launcher) => (
+                        <option key={launcher.id} value={launcher.id}>{launcher.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="terminal-agent-form__folder">
+                    <button type="button" className="terminal-agent-form__folder-button" onClick={handlePickDirectory} title={effectiveCwd ?? 'Choose folder'}>
+                      {folderLabel}
+                    </button>
+                    {cwd && <button type="button" className="terminal-agent-form__clear" onClick={() => setCwd(null)} aria-label="Clear selected folder" title="Clear folder">×</button>}
+                  </div>
+                  {effectiveCwd && <div className="terminal-agent-form__path" title={effectiveCwd}>{effectiveCwd}</div>}
+                  <button type="button" className="terminal-agent-form__launch" onClick={handleLaunchSession}>
+                    Start {selectedLauncher.name}
+                  </button>
+                </div>
+              )}
+            </div>
+            <button type="button" className="terminal-toolbar-button" onClick={handlePickDirectory} title={effectiveCwd ?? 'Set folder'}>
+              {effectiveCwd ? folderLabel : 'Set folder'}
+            </button>
+            <div ref={layoutMenuRef} className="terminal-toolbar-menu">
+              <button
+                type="button"
+                className="terminal-toolbar-icon"
+                aria-label="Session layout"
+                aria-haspopup="menu"
+                aria-expanded={layoutMenuOpen}
+                title="Session layout"
+                onClick={() => {
+                  setLayoutMenuOpen((value) => !value)
+                  setCreateMenuOpen(false)
+                }}
+              >
+                ⋮
+              </button>
+              {layoutMenuOpen && (
+                <div className="terminal-toolbar-popover terminal-layout-popover" role="menu" aria-label="Session layout actions">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      handleSoloSession()
+                      setLayoutMenuOpen(false)
+                    }}
+                    disabled={visibleSessions.length <= 1}
+                  >
+                    Solo active
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      handleTileAll()
+                      setLayoutMenuOpen(false)
+                    }}
+                    disabled={workspaceSessions.length <= 1 || visibleSessionIds.size === workspaceSessions.length}
+                  >
+                    Tile all sessions
+                  </button>
+                  {cwd && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setCwd(null)
+                        setLayoutMenuOpen(false)
+                      }}
+                    >
+                      Clear folder
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -618,28 +765,40 @@ export function TerminalsPane({ visible = true }: { visible?: boolean }) {
           </div>
         )}
 
-        {uniqueSessions.length === 0 && (
+        {workspaceSessions.length === 0 && (
           <div className="terminal-pane">
-            <div className="terminal-launch-card">
+            <div className="terminal-launch-card" role="region" aria-label="Create terminal session">
               <div className="terminal-launch-card__eyebrow">Terminal Sessions</div>
-              <h2 className="terminal-launch-card__title">{selectedLauncher.headline}</h2>
-              <p className="terminal-launch-card__copy">{selectedLauncher.detail}</p>
-              <div className="terminal-launch-card__actions">
-                <button type="button" className="terminal-launch-btn" onClick={handleLaunchSession}>
-                  {selectedLauncher.cta}
+              <h2 className="terminal-launch-card__title">No active sessions</h2>
+              <div className="terminal-agent-form terminal-agent-form--empty">
+                <label className="terminal-agent-form__field">
+                  <span>Agent</span>
+                  <select value={selectedId} onChange={(event) => setSelectedId(event.target.value as TerminalLauncherId)}>
+                    {launchers.map((launcher) => (
+                      <option key={launcher.id} value={launcher.id}>{launcher.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="terminal-agent-form__folder-button"
+                  onClick={handlePickDirectory}
+                  title={effectiveCwd ?? 'Choose folder'}
+                >
+                  {folderLabel}
                 </button>
-                <button type="button" className="terminal-launch-btn terminal-launch-btn--secondary" onClick={handlePickDirectory}>
-                  {cwd ? `${cwd.split('/').at(-1)}` : 'Choose folder'}
+                <button type="button" className="terminal-agent-form__launch" onClick={handleLaunchSession}>
+                  Start {selectedLauncher.name}
                 </button>
                 {cwd && (
-                  <button type="button" className="terminal-launch-btn terminal-launch-btn--clear" onClick={() => setCwd(null)} aria-label="Clear selected folder" title="Clear selected folder">
+                  <button type="button" className="terminal-agent-form__clear" onClick={() => setCwd(null)} aria-label="Clear selected folder" title="Clear folder">
                     ×
                   </button>
                 )}
               </div>
-              {cwd && (
+              {effectiveCwd && (
                 <p className="terminal-launch-card__hint">
-                  Starting in: {cwd}
+                  Starting in: {effectiveCwd}
                 </p>
               )}
               {launchError && (
