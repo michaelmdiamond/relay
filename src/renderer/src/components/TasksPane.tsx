@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { DndContext, DragOverlay, useDraggable, useDroppable } from '@dnd-kit/core'
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
 import type {
+  DispatchRecommendation,
   TaskItem,
   TaskSignal,
   TaskState,
@@ -36,6 +37,10 @@ const launcherOptions: Array<{ id: TerminalLauncherId; label: string }> = [
   { id: 'shell', label: 'Shell' },
 ]
 
+type DispatchState =
+  | { loading: true }
+  | { loading: false; rec: DispatchRecommendation }
+
 function formatRelativeTime(value?: string): string {
   if (!value) return ''
   const timestamp = new Date(value).getTime()
@@ -56,22 +61,66 @@ function stateActionLabel(state: TaskState): string {
   return 'Move to idea'
 }
 
+function DispatchPanel({
+  dispatchState,
+  onConfirm,
+  onDismiss,
+}: {
+  dispatchState: DispatchState
+  onConfirm: (rec: DispatchRecommendation) => void
+  onDismiss: () => void
+}) {
+  if (dispatchState.loading) {
+    return (
+      <div className="dispatch-panel dispatch-panel--loading" onPointerDown={(e) => e.stopPropagation()}>
+        Analyzing task…
+      </div>
+    )
+  }
+  const { rec } = dispatchState
+  return (
+    <div className="dispatch-panel" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="dispatch-panel__header">
+        <span className="dispatch-panel__agent">{rec.agentLabel}</span>
+        <span className="dispatch-panel__reason">{rec.reason}</span>
+      </div>
+      <div className="dispatch-panel__prompt">{rec.launchPrompt}</div>
+      <div className="dispatch-panel__actions">
+        <button type="button" className="dispatch-panel__confirm" onClick={() => onConfirm(rec)}>
+          Launch
+        </button>
+        <button type="button" className="dispatch-panel__dismiss" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function DroppableColumn({
   state,
   label,
   tasks,
+  pendingDispatch,
   onNudge,
   onLaunchTerminal,
   onLaunchWorkflow,
   onArchive,
+  onRequestDispatch,
+  onConfirmDispatch,
+  onDismissDispatch,
 }: {
   state: TaskState
   label: string
   tasks: TaskItem[]
+  pendingDispatch: { taskId: string; dispatchState: DispatchState } | null
   onNudge: (task: TaskItem, state: TaskState) => void
   onLaunchTerminal: (task: TaskItem, launcherId: TerminalLauncherId) => void
   onLaunchWorkflow: (task: TaskItem) => void
   onArchive: (task: TaskItem) => void
+  onRequestDispatch: (task: TaskItem) => void
+  onConfirmDispatch: (rec: DispatchRecommendation) => void
+  onDismissDispatch: () => void
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: state })
 
@@ -86,10 +135,14 @@ function DroppableColumn({
           <TaskCard
             key={task.id}
             task={task}
+            dispatchState={pendingDispatch?.taskId === task.id ? pendingDispatch.dispatchState : null}
             onNudge={onNudge}
             onLaunchTerminal={onLaunchTerminal}
             onLaunchWorkflow={onLaunchWorkflow}
             onArchive={onArchive}
+            onRequestDispatch={onRequestDispatch}
+            onConfirmDispatch={onConfirmDispatch}
+            onDismissDispatch={onDismissDispatch}
           />
         ))}
         {tasks.length === 0 && <div className="task-column__empty">No tasks</div>}
@@ -100,16 +153,24 @@ function DroppableColumn({
 
 function TaskCard({
   task,
+  dispatchState,
   onNudge,
   onLaunchTerminal,
   onLaunchWorkflow,
   onArchive,
+  onRequestDispatch,
+  onConfirmDispatch,
+  onDismissDispatch,
 }: {
   task: TaskItem
+  dispatchState: DispatchState | null
   onNudge: (task: TaskItem, state: TaskState) => void
   onLaunchTerminal: (task: TaskItem, launcherId: TerminalLauncherId) => void
   onLaunchWorkflow: (task: TaskItem) => void
   onArchive: (task: TaskItem) => void
+  onRequestDispatch: (task: TaskItem) => void
+  onConfirmDispatch: (rec: DispatchRecommendation) => void
+  onDismissDispatch: () => void
 }) {
   const [launcherId, setLauncherId] = useState<TerminalLauncherId>('codex')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -129,8 +190,16 @@ function TaskCard({
         onLaunchTerminal={onLaunchTerminal}
         onLaunchWorkflow={onLaunchWorkflow}
         onArchive={onArchive}
+        onRequestDispatch={onRequestDispatch}
       />
       <TaskCardContent task={task} dragProps={{ ...listeners, ...attributes }} />
+      {dispatchState && (
+        <DispatchPanel
+          dispatchState={dispatchState}
+          onConfirm={onConfirmDispatch}
+          onDismiss={onDismissDispatch}
+        />
+      )}
       <div className="task-card__footer">
         {task.suggestedState && task.suggestedState !== task.state && (
           <button type="button" className="task-card__nudge" onClick={() => onNudge(task, task.suggestedState!)}>
@@ -151,6 +220,7 @@ function TaskCardMenu({
   onLaunchTerminal,
   onLaunchWorkflow,
   onArchive,
+  onRequestDispatch,
 }: {
   task: TaskItem
   launcherId: TerminalLauncherId
@@ -160,6 +230,7 @@ function TaskCardMenu({
   onLaunchTerminal: (task: TaskItem, launcherId: TerminalLauncherId) => void
   onLaunchWorkflow: (task: TaskItem) => void
   onArchive: (task: TaskItem) => void
+  onRequestDispatch: (task: TaskItem) => void
 }) {
   return (
     <div className="task-card__menu">
@@ -178,6 +249,15 @@ function TaskCardMenu({
       </button>
       {menuOpen && (
         <div className="task-card__menu-popover" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => {
+              setMenuOpen(false)
+              onRequestDispatch(task)
+            }}
+          >
+            Dispatch
+          </button>
           <label>
             <span>Terminal</span>
             <select value={launcherId} onChange={(event) => setLauncherId(event.target.value as TerminalLauncherId)}>
@@ -268,6 +348,7 @@ export function TasksPane({
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [activeDragTaskId, setActiveDragTaskId] = useState<string | null>(null)
+  const [pendingDispatch, setPendingDispatch] = useState<{ taskId: string; dispatchState: DispatchState } | null>(null)
 
   async function refreshTasks() {
     const nextTasks = await window.api.getTasks()
@@ -354,6 +435,39 @@ export function TasksPane({
     if (archived) setTasks((current) => current.map((entry) => entry.id === archived.id ? archived : entry))
   }
 
+  async function handleRequestDispatch(task: TaskItem) {
+    setError('')
+    setPendingDispatch({ taskId: task.id, dispatchState: { loading: true } })
+    try {
+      const rec = await window.api.getDispatchRecommendation(task.id)
+      setPendingDispatch({ taskId: task.id, dispatchState: { loading: false, rec } })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setPendingDispatch(null)
+    }
+  }
+
+  async function handleConfirmDispatch(rec: DispatchRecommendation) {
+    setPendingDispatch(null)
+    setError('')
+    setNotice('')
+    try {
+      const result = await window.api.dispatchTask(rec.taskId, rec)
+      setNotice(
+        result.kind === 'terminal'
+          ? `Launched ${result.sessionName} with task brief.`
+          : `Started ${result.workflowName}.`
+      )
+      await refreshTasks()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function handleDismissDispatch() {
+    setPendingDispatch(null)
+  }
+
   return (
     <div className="tasks-view">
       <header className="tasks-header">
@@ -380,10 +494,14 @@ export function TasksPane({
               state={column.state}
               label={column.label}
               tasks={visibleTasks.filter((task) => task.state === column.state)}
+              pendingDispatch={pendingDispatch}
               onNudge={(task, state) => void handleNudge(task, state)}
               onLaunchTerminal={(task, launcherId) => void handleLaunchTerminal(task, launcherId)}
               onLaunchWorkflow={(task) => void handleLaunchWorkflow(task)}
               onArchive={(task) => void handleArchive(task)}
+              onRequestDispatch={(task) => void handleRequestDispatch(task)}
+              onConfirmDispatch={(rec) => void handleConfirmDispatch(rec)}
+              onDismissDispatch={handleDismissDispatch}
             />
           ))}
         </div>
