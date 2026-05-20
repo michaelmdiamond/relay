@@ -1,0 +1,87 @@
+name: Dev Log PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "Short factual note about real work, learning, review, or planning"
+        required: true
+        type: string
+      date:
+        description: "Entry date in YYYY-MM-DD; defaults to today's UTC date"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dev-log-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add dev log entry
+        id: entry
+        env:
+          INPUT_DATE: ${{ inputs.date }}
+          INPUT_NOTE: ${{ inputs.note }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$INPUT_DATE" ]; then
+            DATE="$INPUT_DATE"
+          else
+            DATE="$(date -u +%F)"
+          fi
+
+          if [[ ! "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "Date must use YYYY-MM-DD format." >&2
+            exit 1
+          fi
+
+          YEAR="${DATE%%-*}"
+          REST="${DATE#*-}"
+          MONTH="${REST%%-*}"
+          FILE="docs/dev-log/$YEAR/$MONTH/$DATE.md"
+
+          mkdir -p "$(dirname "$FILE")"
+
+          if [ -f "$FILE" ]; then
+            printf -- '- %s\n' "$INPUT_NOTE" >> "$FILE"
+          else
+            printf '# %s\n\n- %s\n' "$DATE" "$INPUT_NOTE" > "$FILE"
+          fi
+
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push branch
+        env:
+          DATE: ${{ steps.entry.outputs.date }}
+          FILE: ${{ steps.entry.outputs.file }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="dev-log/$DATE-${GITHUB_RUN_ID}"
+          git switch -c "$BRANCH"
+          git add "$FILE"
+          git commit -m "Add dev log for $DATE"
+          git push -u origin "$BRANCH"
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DATE: ${{ steps.entry.outputs.date }}
+          FILE: ${{ steps.entry.outputs.file }}
+        run: |
+          gh pr create \
+            --title "Add dev log for $DATE" \
+            --body "Daily dev log entry for $DATE.\n\nFile: \`$FILE\`\n\nThis records real development work, learning, review, or planning."

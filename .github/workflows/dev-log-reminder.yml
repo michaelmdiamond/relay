@@ -1,0 +1,33 @@
+name: Dev Log Reminder
+
+on:
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  reminder:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create reminder issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          DATE="$(date -u +%F)"
+          TITLE="Dev log reminder: $DATE"
+
+          if gh issue list --repo "$REPO" --state open --search "$TITLE in:title" --json number --jq 'length' | grep -q '^0$'; then
+            gh issue create \
+              --repo "$REPO" \
+              --title "$TITLE" \
+              --body "Add one factual note for today, then run the Dev Log PR workflow.\n\nExamples:\n\n- Reviewed one PR or issue\n- Read docs for a current implementation question\n- Reproduced or triaged a bug\n- Sketched a design decision\n- Ran or fixed a test\n\nWorkflow: Actions -> Dev Log PR -> Run workflow"
+          else
+            echo "Reminder issue already exists for $DATE."
+          fi
