@@ -28,7 +28,7 @@ import { isOllamaConfigured, getOllamaConfig, saveOllamaConfig, disconnectOllama
 import { ensureOllamaRunning, stopOllamaProcess, checkOllamaReachable, startAndGetModels, pullOllamaModel } from './ollama-process'
 import { disconnectCursor, getCursorModel, isCursorConnected, saveCursorKey, saveCursorModel } from './cursor-auth'
 import { listCursorModels, validateCursorKey } from './cursor-agent'
-import type { CodexStatusItem, CodexStatusSnapshot, DeepSeekModel, GeminiModel, TerminalLauncherId, TerminalSessionSnapshot } from '../shared/types'
+import type { CodexStatusItem, CodexStatusSnapshot, DeepSeekModel, DispatchRecommendation, GeminiModel, TerminalLauncherId, TerminalSessionSnapshot } from '../shared/types'
 import { getUsageLimits, saveUsageLimits } from './usage-limits'
 import { getConnectorInventory } from './connectors'
 import { getSkills } from './skills'
@@ -55,6 +55,7 @@ import {
 } from './tasks'
 import { getWorkspaceById, getWorkspaceForProjectPath, getWorkspaces } from './workspaces'
 import { codexStatusRevision, getCodexStatusSnapshot } from './codex-status'
+import { getDispatchRecommendation, type DispatchContext } from './dispatcher'
 
 app.setName('Relay')
 process.title = 'Relay'
@@ -229,7 +230,7 @@ function createTray(): void {
   updateTrayStatus(codexStatusSnapshot)
 }
 
-// ── IPC ──────────────────────────────────────────────────────────
+// ── IPC ────────────────────────────────────────────────
 
 ipcMain.handle('get-api-key-status', () => ({ configured: isApiKeyConfigured() }))
 ipcMain.handle('set-api-key', (_e, key: string) => saveApiKey(key))
@@ -296,6 +297,55 @@ ipcMain.handle('start-task-workflow', (_e, taskId: string) => {
   linkWorkflowRunToTask(task.id, run.id)
   reconcileCurrentTasks()
   return run
+})
+ipcMain.handle('get-dispatch-recommendation', (_e, taskId: string) => {
+  const openAI = isOpenAIConnected()
+  const gemini = isGeminiConnected()
+  const deepSeek = isDeepSeekConnected()
+  const ollama = getOllamaConfig()
+  const cursor = isCursorConnected()
+  const ctx: DispatchContext = {
+    openAIConnected: openAI.connected,
+    geminiConnected: gemini.configured,
+    deepSeekConnected: deepSeek.configured,
+    ollamaConfigured: isOllamaConfigured(),
+    cursorConfigured: cursor.configured,
+    ollamaModel: ollama?.model,
+  }
+  return getDispatchRecommendation(taskId, ctx)
+})
+ipcMain.handle('dispatch-task', (_e, taskId: string, rec: DispatchRecommendation) => {
+  const task = getTasks().find((t) => t.id === taskId)
+  if (!task) throw new Error('Task not found.')
+
+  if (rec.agent === 'workflow') {
+    const workflow = getWorkflowDefinitions()[0]
+    if (!workflow) throw new Error('No workflow definition found.')
+    const inferredWorkspaceId = task.workspaceId ?? getWorkspaceForProjectPath(task.projectPath)?.id
+    const run = startWorkflowRun(workflow.id, rec.launchPrompt, inferredWorkspaceId)
+    linkWorkflowRunToTask(task.id, run.id)
+    updateTaskState(task.id, 'running')
+    reconcileCurrentTasks()
+    return { kind: 'workflow' as const, workflowName: run.workflowName }
+  }
+
+  const launcherId = rec.agent as TerminalLauncherId
+  const inferredWorkspaceId = task.workspaceId ?? getWorkspaceForProjectPath(task.projectPath)?.id
+  const session = createTerminalSession(
+    `${launcherId}-${randomUUID()}`,
+    launcherId,
+    `${task.title.slice(0, 36) || 'Task'} - ${launcherId}`,
+    task.projectPath,
+    task.id,
+    inferredWorkspaceId,
+  )
+  linkTerminalToTask(task.id, session.id)
+  updateTaskState(task.id, 'running')
+  setTimeout(() => {
+    ptyProcesses.get(session.id)?.write(`${rec.launchPrompt}\n`)
+  }, 2500)
+  reconcileCurrentTasks()
+  return { kind: 'terminal' as const, sessionId: session.id, sessionName: session.name }
 })
 ipcMain.handle('update-conversation-memory', (_e, conversationId: string, memory) => updateConversationMemory(conversationId, memory))
 ipcMain.handle('compact-conversation', (_e, conversationId: string) => compactConversation(conversationId))
@@ -424,7 +474,7 @@ ipcMain.handle('cancel-message', (_e, conversationId: string) => {
   activeControllers.delete(conversationId)
 })
 
-// ── Terminal / PTY ────────────────────────────────────────────────
+// ── Terminal / PTY ────────────────────────────────────────────
 
 function findCliTool(name: string): string {
   const home = process.env.HOME ?? ''
@@ -644,7 +694,7 @@ ipcMain.handle('terminal-kill', (_e, id: string) => {
   terminalSessions.delete(id)
 })
 
-// ── App lifecycle ─────────────────────────────────────────────────
+// ── App lifecycle ─────────────────────────────────────────────
 
 app.whenReady().then(() => {
   if (process.platform === 'darwin') {

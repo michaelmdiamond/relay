@@ -253,6 +253,16 @@ export interface Conversation {
 export type TerminalLauncherId = 'codex' | 'claude' | 'gemini' | 'deepseek' | 'cursor' | 'local' | 'shell'
 export type TerminalSessionStatus = 'running' | 'exited'
 
+export type DispatchAgent = TerminalLauncherId | 'workflow'
+
+export interface DispatchRecommendation {
+  taskId: string
+  agent: DispatchAgent
+  agentLabel: string
+  reason: string
+  launchPrompt: string
+}
+
 export interface ExternalConversationLink {
   terminalSessionId?: string
   terminalName?: string
@@ -463,7 +473,6 @@ export interface CodexStatusItem {
 export interface CodexStatusSnapshot {
   generatedAt: string
   activeCount: number
-  completedCount: number
   items: CodexStatusItem[]
 }
 
@@ -497,6 +506,8 @@ export interface ChatApi {
   promoteConversationToTask: (conversationId: string, input?: PromoteConversationToTaskInput) => Promise<TaskItem>
   startTaskTerminal: (taskId: string, launcherId: TerminalLauncherId) => Promise<TerminalSessionSnapshot>
   startTaskWorkflow: (taskId: string) => Promise<WorkflowRun>
+  getDispatchRecommendation: (taskId: string) => Promise<DispatchRecommendation>
+  dispatchTask: (taskId: string, rec: DispatchRecommendation) => Promise<{ kind: 'terminal'; sessionId: string; sessionName: string } | { kind: 'workflow'; workflowName: string }>
   sendMessage: (conversationId: string, content: string, modelChoice: ModelChoice, options?: SendMessageOptions) => Promise<void>
   newConversation: (workspaceId?: string) => Promise<Conversation>
   deleteConversation: (id: string) => Promise<void>
