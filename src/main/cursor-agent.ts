@@ -89,7 +89,7 @@ export async function streamCursorAgentMessage(
   const cursorModel = getCursorModel()
   const agent = await Agent.create({
     apiKey,
-    ...(cursorModel === 'auto' ? {} : { model: { id: cursorModel } }),
+    model: { id: cursorModel },
     local: { cwd },
   })
 

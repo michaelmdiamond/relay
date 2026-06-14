@@ -6,11 +6,12 @@ import { TasksPane } from './components/TasksPane'
 import { TerminalsPane } from './components/TerminalsPane'
 import { WorkflowsPane } from './components/WorkflowsPane'
 import { AutomationsPane } from './components/AutomationsPane'
+import { ExperimentsPane } from './components/ExperimentsPane'
 import { ApiKeySetup } from './components/ApiKeySetup'
 import { useChatStore } from './store/chat'
 import type { Workspace } from '../../shared/types'
 
-type WorkspaceView = 'tasks' | 'chat' | 'automations' | 'workflows' | 'terminals'
+type WorkspaceView = 'tasks' | 'chat' | 'experiments' | 'automations' | 'workflows' | 'terminals'
 
 const ACTIVE_WORKSPACE_STORAGE_KEY = 'relay.activeWorkspace'
 const ACTIVE_WORKSPACE_CONTEXT_STORAGE_KEY = 'relay.activeWorkspaceContext'
@@ -19,7 +20,7 @@ const DEFAULT_WORKSPACE: WorkspaceView = 'tasks'
 
 function loadPersistedWorkspace(): WorkspaceView {
   const persisted = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY)
-  if (persisted === 'tasks' || persisted === 'chat' || persisted === 'automations' || persisted === 'workflows' || persisted === 'terminals') {
+  if (persisted === 'tasks' || persisted === 'chat' || persisted === 'experiments' || persisted === 'automations' || persisted === 'workflows' || persisted === 'terminals') {
     return persisted
   }
   return DEFAULT_WORKSPACE
@@ -160,6 +161,21 @@ export default function App() {
     setActiveWorkspace('chat')
   }
 
+  async function handleRestart() {
+    if (!window.confirm('Restart Relay and reload the main process?')) return
+    await window.api.restartApp()
+  }
+
+  async function handleOpenWorkspaceFolder() {
+    const projectPath = await window.terminalApi.selectDirectory()
+    if (!projectPath) return
+    const nextWorkspaces = await window.api.addWorkspaceForPath(projectPath)
+    setWorkspaces(nextWorkspaces)
+    const selected = nextWorkspaces.find((workspace) => workspace.projectPath === projectPath)
+      ?? nextWorkspaces.find((workspace) => workspace.projectPath && projectPath.startsWith(`${workspace.projectPath}/`))
+    if (selected) setActiveWorkspaceId(selected.id)
+  }
+
   if (needsSetup) {
     return (
       <ApiKeySetup onSaved={async () => { setNeedsSetup(false); await load() }} />
@@ -203,8 +219,9 @@ export default function App() {
           <button
             type="button"
             className="toolbar-reload-btn"
-            title="Reload app"
-            onClick={() => location.reload()}
+            title="Restart Relay"
+            aria-label="Restart Relay"
+            onClick={() => void handleRestart()}
           >
             ↺
           </button>
@@ -225,6 +242,7 @@ export default function App() {
           workspaces={workspaces}
           activeWorkspaceId={activeWorkspaceId}
           onWorkspaceChange={setActiveWorkspaceId}
+          onOpenWorkspaceFolder={handleOpenWorkspaceFolder}
         />
         {showSidebar && (
           <Sidebar
@@ -254,8 +272,17 @@ export default function App() {
           <div className="app-section" hidden={activeWorkspace !== 'workflows'}>
             <WorkflowsPane workspaceId={activeWorkspaceId} workspaceKind={selectedWorkspace?.kind} />
           </div>
+          <div className="app-section" hidden={activeWorkspace !== 'experiments'}>
+            <ExperimentsPane
+              workspaceId={activeWorkspaceId}
+              workspaceName={selectedWorkspace?.name}
+              workspaceKind={selectedWorkspace?.kind}
+              workspaceProjectPath={selectedWorkspace?.projectPath}
+              repoWorkspacePaths={repoWorkspacePaths}
+            />
+          </div>
           <div className="app-section" hidden={activeWorkspace !== 'automations'}>
-            <AutomationsPane />
+            <AutomationsPane workspaceId={activeWorkspaceId} workspaces={workspaces} onWorkspacesChange={setWorkspaces} />
           </div>
           <div className="app-section" hidden={activeWorkspace !== 'terminals'}>
             <TerminalsPane

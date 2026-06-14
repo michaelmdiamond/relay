@@ -3,65 +3,101 @@
     "mtime": 1777496893.163562,
     "hash": "e4a9949298033786266d65712ada8e6a"
   },
+  "/Users/michael/Documents/GitHub/relay/scripts/dev-log.mjs": {
+    "mtime": 1779319167.6366377,
+    "hash": "f6310cfc35bc2db926c45e2f728c6f92"
+  },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/App.tsx": {
-    "mtime": 1777770461.0850997,
-    "hash": "838a122938e0526d21a9f19e19918b46"
+    "mtime": 1779039576.3347974,
+    "hash": "eb3f45711c1c6c6abd310b20702ef0a4"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/main.tsx": {
-    "mtime": 1777496893.1627457,
-    "hash": "3dabf858675ddfd21228f995fb9f9e3e"
+    "mtime": 1779039576.3380542,
+    "hash": "46065af3480d7ff7b036f7dea3ef2fbf"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/ConnectionsDashboard.tsx": {
-    "mtime": 1777930703.7089207,
-    "hash": "c5c9ca20e707322233129f8f49fdf814"
+    "mtime": 1778706423.4712236,
+    "hash": "340b1d9de2c0cfc994b5927acfc22a18"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/RoutingBadge.tsx": {
-    "mtime": 1777663662.9260983,
-    "hash": "bc4ac5c401f6912cef57bf8f8574fc4f"
+    "mtime": 1778706423.4720666,
+    "hash": "5348b8af5448a65f1857e7832581614b"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/AutomationsPane.tsx": {
+    "mtime": 1779039576.3352523,
+    "hash": "52da1573fd477916cc7ba9eafc88e8c7"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/WorkflowsPane.tsx": {
-    "mtime": 1777663662.926554,
-    "hash": "73760d0d3d7f0423b7ee279f0cd3cb76"
+    "mtime": 1779039576.3378592,
+    "hash": "dbad91e1b1d86d92ec277a533baad667"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/InputBar.tsx": {
-    "mtime": 1777773433.0021434,
-    "hash": "b26126f548b436c248843dc18a7dd96f"
+    "mtime": 1778706423.471522,
+    "hash": "c584c0741946da6b1d0a8a2c2bfdc5a1"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/StatusHud.tsx": {
+    "mtime": 1779039576.3370147,
+    "hash": "9809ac3f0dc57a99062a3e85f8767995"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/UsageDashboard.tsx": {
-    "mtime": 1777768376.8689628,
-    "hash": "b071e183f46b24b0881c65fc320e3724"
+    "mtime": 1778706423.4738314,
+    "hash": "8bdc681b32b96c67c4e14d74ae60cbdb"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/CodexStatusBar.tsx": {
+    "mtime": 1779039576.3359237,
+    "hash": "7b800efca92f847657e919cb1236d1f1"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/ChatPane.tsx": {
-    "mtime": 1777773433.0017998,
-    "hash": "862f908a7c93e5b1028dd92c586f78ef"
+    "mtime": 1779039576.3356853,
+    "hash": "941e591ecd62c2b49f9cef637a17e2cc"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/TasksPane.tsx": {
+    "mtime": 1779039576.337322,
+    "hash": "86f3210e53cf4a8d55b5498e96cfb1f1"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/ModelSelector.tsx": {
-    "mtime": 1777773433.0023255,
-    "hash": "1d8caab1b82a30bda6bd681f454a7c21"
+    "mtime": 1778706423.4718423,
+    "hash": "be7d69c85dfd5b4b6cb06e78f75d079e"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/MessageBubble.tsx": {
     "mtime": 1777663662.9258606,
     "hash": "c7951aa7319dcfbb8870cda2a97dbc44"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/Sidebar.tsx": {
-    "mtime": 1777663894.3613245,
-    "hash": "bdb4c296f99effe2faf0b4b5638fb34c"
+    "mtime": 1779039576.336774,
+    "hash": "93f101e2cecc5ced88cf475da1de052f"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/TerminalsPane.tsx": {
-    "mtime": 1777930703.70921,
-    "hash": "d8a1ee4266a39754a64328dc83777050"
+    "mtime": 1779039576.3375852,
+    "hash": "10eadb6264bc845ef092648d57138309"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/ApiKeySetup.tsx": {
-    "mtime": 1777930703.7086332,
-    "hash": "690faddb9a38503ffa660cc2c97b1914"
+    "mtime": 1778706423.4704487,
+    "hash": "0c7ae2d5821ad30a99186cc880395f2a"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/AgentProfileEditor.tsx": {
+    "mtime": 1779039576.335028,
+    "hash": "c3d6ed06f521356af16322558a810cd3"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/renderer/src/components/IconRail.tsx": {
+    "mtime": 1779039576.3365042,
+    "hash": "fd985b4366a32e429fd9b9cf4f4ee85a"
   },
   "/Users/michael/Documents/GitHub/relay/src/renderer/src/store/chat.ts": {
     "mtime": 1777663662.9266596,
     "hash": "b0ad7a6f03d7a98cac90351cf73c7b59"
   },
   "/Users/michael/Documents/GitHub/relay/src/shared/types.ts": {
-    "mtime": 1777930703.709863,
-    "hash": "736cc8a361079c050840f5ea4d04ddf3"
+    "mtime": 1779039576.3389566,
+    "hash": "6e9a18b44748864d423126a1f98f4d60"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/workspaces.ts": {
+    "mtime": 1779039576.33417,
+    "hash": "e6da7d47265a0d68a97cb5080a3b4a2c"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/codex-status.ts": {
+    "mtime": 1779039576.3328555,
+    "hash": "7c3b3f319b2d6062e76fdc70054b2226"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/ollama.ts": {
     "mtime": 1777663662.924536,
@@ -80,24 +116,32 @@
     "hash": "1f666a2fcc1c655210cf1bc1091e1a0d"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/router.ts": {
-    "mtime": 1777773433.0012648,
-    "hash": "5477537e1fe8c0140b92f70650b66690"
+    "mtime": 1778706423.4682264,
+    "hash": "bc869bec0f2a5720e81a1937373e1419"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/workflows.ts": {
-    "mtime": 1777773433.00143,
-    "hash": "63379ed0cac283ea5dc9b12c376b7c7e"
+    "mtime": 1779039576.333665,
+    "hash": "1660acdd863c1fbcb23f3f21242f5972"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/openai-auth.ts": {
     "mtime": 1777771331.5524626,
     "hash": "1ba605803c1d44cd9cb12485c6dd1301"
   },
+  "/Users/michael/Documents/GitHub/relay/src/main/deepseek.ts": {
+    "mtime": 1778706423.467641,
+    "hash": "2ac784489be20de43ee6d5f7bb24b279"
+  },
   "/Users/michael/Documents/GitHub/relay/src/main/openai-codex.ts": {
     "mtime": 1777773433.001117,
     "hash": "2440e9b8dd6429ed6c00ea6b3b046881"
   },
+  "/Users/michael/Documents/GitHub/relay/src/main/automations.ts": {
+    "mtime": 1779039576.332212,
+    "hash": "31d87aed2e4935b0eac2f118d4ebdeb7"
+  },
   "/Users/michael/Documents/GitHub/relay/src/main/chat.ts": {
-    "mtime": 1777773433.0006638,
-    "hash": "5caddadf5d2860124a594a2aa34d21ac"
+    "mtime": 1779039576.3325741,
+    "hash": "95487b4b80d232bb33bbd903ef93ffaf"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/system-prompt.ts": {
     "mtime": 1777663662.924836,
@@ -112,39 +156,63 @@
     "hash": "30b8bdfe7aa922f31352e05d51b4efc6"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/usage-limits.ts": {
-    "mtime": 1777771331.5541139,
-    "hash": "d7aeebc53d73a77597f66d1685e0a7f6"
+    "mtime": 1778706423.4687428,
+    "hash": "83f4e591490fcee5664128b46c71c05b"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/index.ts": {
-    "mtime": 1777930703.7076802,
-    "hash": "2a8cd8f584900cfc2a37020563f243bc"
+    "mtime": 1779039576.3331325,
+    "hash": "6542ad4885eceabf1490e97641365763"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/skills.ts": {
     "mtime": 1777665380.8067577,
     "hash": "043ed698403ff04d01e8f5c8e5045082"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/connectors.ts": {
-    "mtime": 1777663662.9238315,
-    "hash": "a871e2c2bdd59b904a1a2c3a86be9253"
+    "mtime": 1778706423.467061,
+    "hash": "440bf2d90d8d73516413884e64778837"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/tasks.ts": {
+    "mtime": 1779039576.3334055,
+    "hash": "80b8bcb50ae7b7f1539460c48e9fa760"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/cursor-agent.ts": {
     "mtime": 1777663662.9239466,
     "hash": "bbbcd1e3b9a008276941f48be39789f7"
+  },
+  "/Users/michael/Documents/GitHub/relay/src/main/deepseek-auth.ts": {
+    "mtime": 1778706423.467398,
+    "hash": "fcac52e418d5c5e7c03787f00533fe20"
   },
   "/Users/michael/Documents/GitHub/relay/src/main/ollama-process.ts": {
     "mtime": 1777930703.7079716,
     "hash": "2885c7baa95af168c5da6df9a339a0e4"
   },
   "/Users/michael/Documents/GitHub/relay/src/preload/index.ts": {
-    "mtime": 1777930703.708307,
-    "hash": "d06cd92516a3ed7ebc449c0b84ab6a95"
+    "mtime": 1779039576.3345158,
+    "hash": "059242fa6538493a42f0d78da344a9c7"
   },
   "/Users/michael/Documents/GitHub/relay/README.md": {
     "mtime": 1777930703.7073522,
     "hash": "02075728cff14db6171a754990c2d3c5"
   },
+  "/Users/michael/Documents/GitHub/relay/AGENTS.md": {
+    "mtime": 1778706423.4408038,
+    "hash": "515a83eed99fb26dd36dc163da04e697"
+  },
+  "/Users/michael/Documents/GitHub/relay/CLAUDE.md": {
+    "mtime": 1779039576.331587,
+    "hash": "2b5a91bb5fe198a0d785ab2f733c0538"
+  },
+  "/Users/michael/Documents/GitHub/relay/docs/continuity-spec.md": {
+    "mtime": 1779039576.3319373,
+    "hash": "e3071de49d705c38a6a30265257af9e6"
+  },
+  "/Users/michael/Documents/GitHub/relay/docs/dev-log/README.md": {
+    "mtime": 1779319525.379325,
+    "hash": "28720d158e0563cc2a283d13d09ea681"
+  },
   "/Users/michael/Documents/GitHub/relay/src/renderer/index.html": {
-    "mtime": 1777496893.1616478,
-    "hash": "d4c476aa135a258119dee5c9d4725fad"
+    "mtime": 1778706423.4695911,
+    "hash": "b27bebad6e760f51c88597fe9a7056a7"
   }
 }

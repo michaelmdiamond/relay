@@ -412,7 +412,7 @@ export function ChatPane({
   const { conversations, activeId, activePane, modelChoice, sending, setModelChoice, setSending, setActiveId, replaceConversation, prependConversation } = useChatStore()
   const [codexModel, setCodexModelState] = useState<string>(CODEX_MODELS[0])
   const [codexModels, setCodexModels] = useState<string[]>([...CODEX_MODELS])
-  const [geminiModel, setGeminiModelState] = useState<GeminiModel>('gemini-2.5-flash')
+  const [geminiModel, setGeminiModelState] = useState<GeminiModel>('gemini-3.5-flash')
   const [deepSeekModel, setDeepSeekModelState] = useState<DeepSeekModel>('deepseek-v4-flash')
   const [ollamaModel, setOllamaModelState] = useState<string | null>(null)
   const [ollamaModels, setOllamaModels] = useState<string[]>([])

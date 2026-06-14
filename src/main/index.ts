@@ -28,19 +28,33 @@ import { isOllamaConfigured, getOllamaConfig, saveOllamaConfig, disconnectOllama
 import { ensureOllamaRunning, stopOllamaProcess, checkOllamaReachable, startAndGetModels, pullOllamaModel } from './ollama-process'
 import { disconnectCursor, getCursorModel, isCursorConnected, saveCursorKey, saveCursorModel } from './cursor-auth'
 import { listCursorModels, validateCursorKey } from './cursor-agent'
-import type { CodexStatusItem, CodexStatusSnapshot, DeepSeekModel, GeminiModel, TerminalLauncherId, TerminalSessionSnapshot } from '../shared/types'
+import type { AgentRunEvent, AgentRunNode, AgentRunSnapshot, AgentRunStatus, CodexStatusItem, CodexStatusSnapshot, DeepSeekModel, GeminiModel, TerminalLauncherId, TerminalSessionSnapshot } from '../shared/types'
 import { getUsageLimits, saveUsageLimits } from './usage-limits'
 import { getConnectorInventory } from './connectors'
 import { getSkills } from './skills'
 import {
+  deleteAgentProfile,
+  getAgentKnowledge,
   getAgentProfiles,
+  getAgentRuns,
   getWorkflowDefinitions,
   getWorkflowRuns,
   saveAgentProfile,
+  runAgentProfile,
   setWorkflowRunEmitter,
   startWorkflowRun,
 } from './workflows'
 import { getAutomationCatalog } from './automations'
+import {
+  createScheduledAutomation,
+  deleteScheduledAutomation,
+  getScheduledAutomations,
+  initAutomationScheduler,
+  runAutomationNow,
+  setAutomationEmitter,
+  shutdownAutomationScheduler,
+  updateScheduledAutomation,
+} from './scheduled-automations'
 import {
   archiveTask,
   createTask,
@@ -53,7 +67,22 @@ import {
   updateTask,
   updateTaskState,
 } from './tasks'
-import { getWorkspaceById, getWorkspaceForProjectPath, getWorkspaces } from './workspaces'
+import {
+  archiveExperimentCase,
+  createExperimentAttempt,
+  createExperimentCase,
+  findExperimentAttemptForTask,
+  findExperimentAttemptForTerminal,
+  generateExperimentPostmortem,
+  getExperiments,
+  linkAttemptEvidence,
+  recordGuardrailEvent,
+  setExperimentsEmitter,
+  updateExperimentAttempt,
+  updateExperimentCase,
+  upsertRunEvidenceFromSnapshot,
+} from './experiments'
+import { addWorkspaceForProjectPath, getWorkspaceById, getWorkspaceForProjectPath, getWorkspaces } from './workspaces'
 import { codexStatusRevision, getCodexStatusSnapshot } from './codex-status'
 
 app.setName('Relay')
@@ -71,13 +100,26 @@ function sendToWindow(target: BrowserWindow | null, channel: string, ...args: un
   target.webContents.send(channel, ...args)
 }
 
+function restartRelay(): void {
+  app.relaunch()
+  app.exit(0)
+}
+
 setWorkflowRunEmitter((run) => {
   sendToWindow(win, 'workflow-run-updated', run)
   reconcileCurrentTasks()
 })
 
+setAutomationEmitter((automations) => {
+  sendToWindow(win, 'scheduled-automations-updated', automations)
+})
+
 setTaskEmitter((tasks) => {
   sendToWindow(win, 'tasks-updated', tasks)
+})
+
+setExperimentsEmitter((snapshot) => {
+  sendToWindow(win, 'experiments-updated', snapshot)
 })
 
 function createWindow(): void {
@@ -181,6 +223,66 @@ function showMainWindow(): void {
   win?.focus()
 }
 
+function createApplicationMenu(): void {
+  const appMenu: MenuItemConstructorOptions = process.platform === 'darwin'
+    ? {
+        label: app.name,
+        submenu: [
+          { label: 'Restart Relay', accelerator: 'CommandOrControl+Shift+R', click: restartRelay },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit', label: 'Quit Relay' },
+        ],
+      }
+    : {
+        label: 'File',
+        submenu: [
+          { label: 'Restart Relay', accelerator: 'CommandOrControl+Shift+R', click: restartRelay },
+          { type: 'separator' },
+          { role: 'quit', label: 'Quit Relay' },
+        ],
+      }
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    appMenu,
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'close' },
+      ],
+    },
+  ]))
+}
+
 function buildStatusMenu(snapshot: CodexStatusSnapshot): MenuItemConstructorOptions[] {
   const statusItems: MenuItemConstructorOptions[] = snapshot.items.slice(0, 8).map((item) => ({
     label: `${STATE_LABEL[item.state]} · ${truncateMenuText(item.agentNickname || item.title, 42)} · ${formatStatusAge(item.lastActivityAt)}`,
@@ -199,6 +301,10 @@ function buildStatusMenu(snapshot: CodexStatusSnapshot): MenuItemConstructorOpti
     {
       label: 'Open Relay',
       click: showMainWindow,
+    },
+    {
+      label: 'Restart Relay',
+      click: restartRelay,
     },
     {
       label: 'Refresh Status',
@@ -234,6 +340,7 @@ function createTray(): void {
 ipcMain.handle('get-api-key-status', () => ({ configured: isApiKeyConfigured() }))
 ipcMain.handle('set-api-key', (_e, key: string) => saveApiKey(key))
 ipcMain.handle('get-workspaces', () => getWorkspaces(getConversations(terminalSnapshots(), getTasks()), getTasks()))
+ipcMain.handle('add-workspace-for-path', (_e, projectPath: string) => addWorkspaceForProjectPath(projectPath))
 ipcMain.handle('get-conversations', () => getConversations(terminalSnapshots(), getTasks()))
 ipcMain.handle('get-connector-inventory', () => getConnectorInventory())
 ipcMain.handle('get-skills', () => getSkills())
@@ -297,15 +404,33 @@ ipcMain.handle('start-task-workflow', (_e, taskId: string) => {
   reconcileCurrentTasks()
   return run
 })
+ipcMain.handle('get-experiments', () => getExperiments())
+ipcMain.handle('create-experiment-case', (_e, input) => createExperimentCase(input))
+ipcMain.handle('update-experiment-case', (_e, id: string, input) => updateExperimentCase(id, input))
+ipcMain.handle('archive-experiment-case', (_e, id: string) => archiveExperimentCase(id))
+ipcMain.handle('create-experiment-attempt', (_e, experimentId: string, input) => createExperimentAttempt(experimentId, input))
+ipcMain.handle('update-experiment-attempt', (_e, id: string, input) => updateExperimentAttempt(id, input))
+ipcMain.handle('link-attempt-evidence', (_e, attemptId: string, links) => linkAttemptEvidence(attemptId, links))
+ipcMain.handle('generate-experiment-postmortem', (_e, experimentId: string, input) => generateExperimentPostmortem(experimentId, input))
 ipcMain.handle('update-conversation-memory', (_e, conversationId: string, memory) => updateConversationMemory(conversationId, memory))
 ipcMain.handle('compact-conversation', (_e, conversationId: string) => compactConversation(conversationId))
 ipcMain.handle('estimate-tokens', (_e, text: string) => estimateTokens(text))
+ipcMain.handle('restart-app', () => restartRelay())
 ipcMain.handle('get-agent-profiles', () => getAgentProfiles())
 ipcMain.handle('save-agent-profile', (_e, profile) => saveAgentProfile(profile))
+ipcMain.handle('delete-agent-profile', (_e, id: string) => deleteAgentProfile(id))
+ipcMain.handle('get-agent-knowledge', (_e, agentId: string) => getAgentKnowledge(agentId))
+ipcMain.handle('get-agent-runs', (_e, agentId: string) => getAgentRuns(agentId))
+ipcMain.handle('run-agent-profile', (_e, input) => runAgentProfile(input))
 ipcMain.handle('get-workflow-definitions', () => getWorkflowDefinitions())
 ipcMain.handle('get-workflow-runs', () => getWorkflowRuns())
 ipcMain.handle('start-workflow-run', (_e, workflowId: string, goal: string, workspaceId?: string) => startWorkflowRun(workflowId, goal, workspaceId))
 ipcMain.handle('get-automation-catalog', () => getAutomationCatalog())
+ipcMain.handle('get-scheduled-automations', () => getScheduledAutomations())
+ipcMain.handle('create-scheduled-automation', (_e, input) => createScheduledAutomation(input))
+ipcMain.handle('update-scheduled-automation', (_e, id: string, input) => updateScheduledAutomation(id, input))
+ipcMain.handle('delete-scheduled-automation', (_e, id: string) => deleteScheduledAutomation(id))
+ipcMain.handle('run-automation-now', (_e, id: string) => runAutomationNow(id))
 ipcMain.handle('new-conversation', (_e, workspaceId?: string) => {
   const workspace = getWorkspaceById(workspaceId)
   return newConversation({
@@ -457,8 +582,13 @@ interface TerminalSessionState extends TerminalSessionSnapshot {
 }
 
 const TERMINAL_BUFFER_LIMIT = 200_000
+const AGENT_RUN_EVENT_LIMIT = 200
 const ptyProcesses = new Map<string, pty.IPty>()
 const terminalSessions = new Map<string, TerminalSessionState>()
+const agentRuns = new Map<string, AgentRunSnapshot>()
+const terminalAgentRunIds = new Map<string, string>()
+const terminalOutputTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const terminalOutputPreviews = new Map<string, string>()
 let taskReconcileTimer: ReturnType<typeof setTimeout> | null = null
 
 function terminalEnvironment(): Record<string, string> {
@@ -493,6 +623,151 @@ function appendOutputPreview(currentPreview: string, data: string): string {
   return [...currentPreview.split('\n').filter(Boolean), ...cleanLines].slice(-3).join('\n').slice(-500)
 }
 
+function previewText(value: string): string {
+  return stripAnsi(value)
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(-2)
+    .join('\n')
+    .slice(-240)
+}
+
+function cleanOutputLines(value: string): string[] {
+  return stripAnsi(value)
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+}
+
+function compactTerminalLine(line: string): string {
+  return line
+    .replace(/^[•›\s└─│]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function eventExists(run: AgentRunSnapshot, event: Omit<AgentRunEvent, 'id' | 'runId' | 'createdAt'>): boolean {
+  const key = [
+    event.type,
+    event.tool ?? '',
+    event.path ?? '',
+    event.message ?? '',
+    event.summary ?? '',
+    event.result ?? '',
+    event.text ?? '',
+  ].join('|')
+  return run.events.slice(-24).some((existing) => [
+    existing.type,
+    existing.tool ?? '',
+    existing.path ?? '',
+    existing.message ?? '',
+    existing.summary ?? '',
+    existing.result ?? '',
+    existing.text ?? '',
+  ].join('|') === key)
+}
+
+function appendUniqueAgentRunEvent(runId: string, event: Omit<AgentRunEvent, 'id' | 'runId' | 'createdAt'>): AgentRunSnapshot | null {
+  const run = agentRuns.get(runId)
+  if (!run || eventExists(run, event)) return run ?? null
+  return appendAgentRunEvent(runId, event)
+}
+
+function inferActivityEventFromLine(agent: AgentRunNode, line: string): Omit<AgentRunEvent, 'id' | 'runId' | 'createdAt'> | null {
+  const text = compactTerminalLine(line)
+  if (!text || text.length < 3) return null
+
+  const fileMatch = text.match(/^(Edited|Created|Deleted)\s+(.+?)(?:\s+\([^)]+\))?$/i)
+  if (fileMatch) {
+    const verb = fileMatch[1].toLowerCase()
+    return {
+      agentId: agent.id,
+      parentAgentId: agent.parentAgentId,
+      type: 'file_touched',
+      path: fileMatch[2],
+      action: verb === 'created' ? 'create' : verb === 'deleted' ? 'delete' : 'edit',
+      summary: `${fileMatch[1]} ${fileMatch[2]}`,
+    }
+  }
+
+  const commandMatch = text.match(/^(?:Ran|Run)\s+(.+)$/i)
+  if (commandMatch) {
+    return {
+      agentId: agent.id,
+      parentAgentId: agent.parentAgentId,
+      type: 'tool_started',
+      tool: 'terminal',
+      summary: commandMatch[1].slice(0, 220),
+    }
+  }
+
+  if (/^(Searching the web|Searched\b|Search\b)/i.test(text)) {
+    return {
+      agentId: agent.id,
+      parentAgentId: agent.parentAgentId,
+      type: 'tool_started',
+      tool: 'web',
+      summary: text.slice(0, 220),
+    }
+  }
+
+  if (/^(Read|List|Open|Explored)\b/i.test(text)) {
+    return {
+      agentId: agent.id,
+      parentAgentId: agent.parentAgentId,
+      type: 'tool_started',
+      tool: 'workspace',
+      summary: text.slice(0, 220),
+    }
+  }
+
+  if (/\b(?:npm|pnpm|yarn|bun|cargo|go|pytest|python|uv|swift|xcodebuild)\s+(?:run\s+)?(?:test|build|typecheck|check|lint)\b/i.test(text)) {
+    return {
+      agentId: agent.id,
+      parentAgentId: agent.parentAgentId,
+      type: 'tool_started',
+      tool: 'verification',
+      summary: text.slice(0, 220),
+    }
+  }
+
+  if (/^(Implemented|Fixed|Verified|Verification|Blocked|Failed|Error|Done|Completed)\b/i.test(text)) {
+    return {
+      agentId: agent.id,
+      parentAgentId: agent.parentAgentId,
+      type: 'agent_status',
+      status: /^Blocked\b/i.test(text) ? 'blocked' : 'running',
+      message: text.slice(0, 260),
+    }
+  }
+
+  if (/^(I('|’)m|I will|I’ll|I found|I need|I don('|’)t|The )/i.test(text) && text.length <= 280) {
+    return {
+      agentId: agent.id,
+      parentAgentId: agent.parentAgentId,
+      type: 'agent_status',
+      status: 'running',
+      message: text,
+    }
+  }
+
+  return null
+}
+
+function inferActivityEventsFromTerminalOutput(sessionId: string, data: string): void {
+  const run = agentRunForTerminal(sessionId)
+  const agent = run?.agents.find((entry) => entry.role === 'main') ?? run?.agents[0]
+  if (!run || !agent) return
+  for (const line of cleanOutputLines(data)) {
+    const event = inferActivityEventFromLine(agent, line)
+    if (!event) continue
+    appendUniqueAgentRunEvent(run.id, event)
+  }
+}
+
 function terminalSessionSnapshot(session: TerminalSessionState): TerminalSessionSnapshot {
   const { output: _output, outputSequence: _outputSequence, ...snapshot } = session
   return snapshot
@@ -500,6 +775,191 @@ function terminalSessionSnapshot(session: TerminalSessionState): TerminalSession
 
 function terminalSnapshots(): TerminalSessionSnapshot[] {
   return Array.from(terminalSessions.values()).map(terminalSessionSnapshot)
+}
+
+function emitAgentRunUpdated(run: AgentRunSnapshot): void {
+  sendToWindow(win, 'agent-run-updated', run)
+}
+
+function agentRunForTerminal(terminalSessionId: string): AgentRunSnapshot | null {
+  const runId = terminalAgentRunIds.get(terminalSessionId)
+  return runId ? agentRuns.get(runId) ?? null : null
+}
+
+function updateAgentRun(runId: string, updater: (run: AgentRunSnapshot) => AgentRunSnapshot): AgentRunSnapshot | null {
+  const current = agentRuns.get(runId)
+  if (!current) return null
+  const next = updater(current)
+  agentRuns.set(runId, next)
+  upsertRunEvidenceFromSnapshot(next)
+  emitAgentRunUpdated(next)
+  return next
+}
+
+function appendAgentRunEvent(runId: string, event: Omit<AgentRunEvent, 'id' | 'runId' | 'createdAt'>): AgentRunSnapshot | null {
+  return updateAgentRun(runId, (run) => {
+    const now = new Date().toISOString()
+    const nextEvent: AgentRunEvent = {
+      ...event,
+      id: `${runId}-event-${randomUUID()}`,
+      runId,
+      createdAt: now,
+    }
+    const agents = run.agents.map((agent): AgentRunNode => {
+      if (agent.id !== event.agentId) return agent
+      const nextStatus = event.status ?? agent.status
+      const nextFiles = event.path ? [...new Set([...agent.filesTouched, event.path])] : agent.filesTouched
+      return {
+        ...agent,
+        status: nextStatus,
+        message: event.message ?? event.summary ?? event.result ?? agent.message,
+        updatedAt: now,
+        completedAt: nextStatus === 'done' || nextStatus === 'failed' ? now : agent.completedAt,
+        filesTouched: nextFiles,
+        lastOutputPreview: event.text ? previewText(event.text) || agent.lastOutputPreview : agent.lastOutputPreview,
+      }
+    })
+    const status = agents.some((agent) => agent.status === 'failed')
+      ? 'failed'
+      : agents.every((agent) => agent.status === 'done')
+        ? 'done'
+        : agents.some((agent) => agent.status === 'blocked')
+          ? 'blocked'
+          : 'running'
+    return {
+      ...run,
+      status,
+      updatedAt: now,
+      agents,
+      events: [...run.events, nextEvent].slice(-AGENT_RUN_EVENT_LIMIT),
+    }
+  })
+}
+
+function addAgentRunNode(runId: string, node: AgentRunNode, eventMessage: string): AgentRunSnapshot | null {
+  const added = updateAgentRun(runId, (run) => {
+    if (run.agents.some((agent) => agent.id === node.id || agent.title === node.title)) return run
+    const now = new Date().toISOString()
+    return {
+      ...run,
+      status: 'running',
+      updatedAt: now,
+      agents: [...run.agents, node],
+    }
+  })
+  const current = agentRuns.get(runId)
+  const agent = current?.agents.find((entry) => entry.id === node.id || entry.title === node.title)
+  if (!agent || current?.events.some((event) => event.agentId === agent.id && event.type === 'agent_started')) return added
+  return appendAgentRunEvent(runId, {
+    agentId: agent.id,
+    parentAgentId: agent.parentAgentId,
+    type: 'agent_started',
+    title: agent.title,
+    status: 'running',
+    message: eventMessage,
+  })
+}
+
+function createAgentRunForTerminal(session: TerminalSessionState): AgentRunSnapshot {
+  const existing = agentRunForTerminal(session.id)
+  if (existing) return existing
+  const now = new Date().toISOString()
+  const agentId = `${session.id}:main`
+  const run: AgentRunSnapshot = {
+    id: `terminal-run-${session.id}`,
+    terminalSessionId: session.id,
+    workspaceId: session.workspaceId,
+    title: session.name,
+    status: 'running',
+    createdAt: now,
+    updatedAt: now,
+    agents: [{
+      id: agentId,
+      title: session.name,
+      provider: session.launcherId,
+      role: 'main',
+      status: 'running',
+      message: session.cwd ? `Running in ${session.cwd}` : 'Terminal session started.',
+      startedAt: now,
+      updatedAt: now,
+      filesTouched: [],
+    }],
+    events: [],
+  }
+  agentRuns.set(run.id, run)
+  terminalAgentRunIds.set(session.id, run.id)
+  appendAgentRunEvent(run.id, {
+    agentId,
+    type: 'agent_started',
+    title: session.name,
+    status: 'running',
+    message: session.cwd ? `Running in ${session.cwd}` : 'Terminal session started.',
+  })
+  return agentRuns.get(run.id) ?? run
+}
+
+function updateTerminalAgentStatus(sessionId: string, status: AgentRunStatus, message: string): void {
+  const run = agentRunForTerminal(sessionId)
+  const agent = run?.agents[0]
+  if (!run || !agent) return
+  appendAgentRunEvent(run.id, {
+    agentId: agent.id,
+    type: status === 'done' || status === 'failed' ? 'agent_finished' : 'agent_status',
+    status,
+    message,
+    result: message,
+  })
+}
+
+function inferSubagentsFromTerminalOutput(sessionId: string, data: string): void {
+  const run = agentRunForTerminal(sessionId)
+  const mainAgent = run?.agents.find((agent) => agent.role === 'main') ?? run?.agents[0]
+  if (!run || !mainAgent) return
+  const lines = cleanOutputLines(data)
+  for (const line of lines) {
+    if (!/(sub[-\s]?agent|worker|delegate|spawn(?:ed|ing)?|launch(?:ed|ing)?.*(agent|worker|task)|task agent)/i.test(line)) continue
+    const title = line
+      .replace(/^[\W_]+/, '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 80)
+    const nodeId = `${sessionId}:sub:${Buffer.from(title).toString('base64url').slice(0, 24)}`
+    addAgentRunNode(run.id, {
+      id: nodeId,
+      title,
+      provider: mainAgent.provider,
+      role: 'subagent',
+      parentAgentId: mainAgent.id,
+      status: 'running',
+      message: 'Reported by terminal output.',
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      filesTouched: [],
+    }, 'Reported by terminal output.')
+  }
+}
+
+function scheduleTerminalOutputEvent(sessionId: string, data: string): void {
+  const preview = previewText(data)
+  if (!preview) return
+  terminalOutputPreviews.set(sessionId, preview)
+  inferSubagentsFromTerminalOutput(sessionId, data)
+  inferActivityEventsFromTerminalOutput(sessionId, data)
+  if (terminalOutputTimers.has(sessionId)) return
+  terminalOutputTimers.set(sessionId, setTimeout(() => {
+    terminalOutputTimers.delete(sessionId)
+    const text = terminalOutputPreviews.get(sessionId)
+    terminalOutputPreviews.delete(sessionId)
+    if (!text) return
+    const run = agentRunForTerminal(sessionId)
+    const agent = run?.agents.find((entry) => entry.role === 'main') ?? run?.agents[0]
+    if (!run || !agent) return
+    appendAgentRunEvent(run.id, {
+      agentId: agent.id,
+      type: 'tool_output',
+      text,
+      stream: 'stdout',
+    })
+  }, 750))
 }
 
 function reconcileCurrentTasks(): void {
@@ -543,6 +1003,8 @@ ipcMain.handle('terminal-buffer', (_e, id: string) => {
   return { output: session?.output ?? '', sequence: session?.outputSequence ?? 0 }
 })
 
+ipcMain.handle('terminal-agent-run', (_e, id: string) => agentRunForTerminal(id))
+
 function createTerminalSession(id: string, launcherId: TerminalLauncherId, name: string, cwd?: string, taskId?: string, workspaceId?: string): TerminalSessionSnapshot {
   const existing = terminalSessions.get(id)
   if (existing) return terminalSessionSnapshot(existing)
@@ -582,6 +1044,7 @@ function createTerminalSession(id: string, launcherId: TerminalLauncherId, name:
     outputSequence: 0,
   }
   terminalSessions.set(id, session)
+  createAgentRunForTerminal(session)
   const proc = pty.spawn(file, args, {
     name: 'xterm-256color',
     cols: 80,
@@ -592,6 +1055,7 @@ function createTerminalSession(id: string, launcherId: TerminalLauncherId, name:
   ptyProcesses.set(id, proc)
   proc.onData((data) => {
     const sequence = appendTerminalOutput(id, data)
+    scheduleTerminalOutputEvent(id, data)
     sendToWindow(win, 'terminal-data', id, data, sequence)
   })
   proc.onExit(({ exitCode }) => {
@@ -603,6 +1067,7 @@ function createTerminalSession(id: string, launcherId: TerminalLauncherId, name:
     }
     const exitMessage = `\r\n\x1b[90m[Process exited with code ${exitCode}]\x1b[0m\r\n`
     const sequence = appendTerminalOutput(id, exitMessage)
+    updateTerminalAgentStatus(id, exitCode === 0 ? 'done' : 'failed', `Process exited with code ${exitCode}.`)
     sendToWindow(win, 'terminal-data', id, exitMessage, sequence)
     sendToWindow(win, 'terminal-exit', id, exitCode)
     reconcileCurrentTasks()
@@ -612,6 +1077,31 @@ function createTerminalSession(id: string, launcherId: TerminalLauncherId, name:
   return snapshot
 }
 
+function recordTerminalGuardrailLaunch(session: TerminalSessionSnapshot): void {
+  const attempt = findExperimentAttemptForTerminal(session.id) ?? (session.taskId ? findExperimentAttemptForTask(session.taskId) : null)
+  if (!attempt) return
+  recordGuardrailEvent({
+    attemptId: attempt.id,
+    experimentId: attempt.experimentId,
+    terminalSessionId: session.id,
+    policyId: 'default-passive-policy',
+    severity: 'info',
+    action: 'terminal_launch',
+    detail: `Passive guardrails attached to ${session.name}${session.cwd ? ` in ${session.cwd}` : ''}.`,
+  })
+}
+
+function riskyTerminalInput(data: string): string | null {
+  const compact = data.replace(/\r/g, '\n')
+  if (/rm\s+-rf\s+(?:\/|\*)/.test(compact)) return 'destructive remove command'
+  if (/git\s+reset\s+--hard/.test(compact)) return 'hard git reset'
+  if (/git\s+push\s+--force/.test(compact)) return 'force push'
+  if (/\bsudo\b/.test(compact)) return 'privileged command'
+  if (/curl\b[\s\S]{0,120}\|\s*(?:sh|bash)/.test(compact)) return 'remote shell pipe'
+  if (/chmod\s+-R\s+777/.test(compact)) return 'broad permission change'
+  return null
+}
+
 ipcMain.handle('terminal-create', (_e, id: string, launcherId: TerminalLauncherId, name: string, cwd?: string, taskId?: string, workspaceId?: string) => {
   const selectedWorkspace = getWorkspaceById(workspaceId)
   const inferredWorkspaceId = selectedWorkspace?.kind === 'repo'
@@ -619,11 +1109,27 @@ ipcMain.handle('terminal-create', (_e, id: string, launcherId: TerminalLauncherI
     : getWorkspaceForProjectPath(cwd)?.id ?? workspaceId
   const session = createTerminalSession(id, launcherId, name, cwd, taskId, inferredWorkspaceId)
   if (taskId) linkTerminalToTask(taskId, session.id)
+  recordTerminalGuardrailLaunch(session)
   reconcileCurrentTasks()
   return session
 })
 
 ipcMain.on('terminal-input', (_e, id: string, data: string) => {
+  const riskyAction = riskyTerminalInput(data)
+  if (riskyAction) {
+    const attempt = findExperimentAttemptForTerminal(id)
+    if (attempt) {
+      recordGuardrailEvent({
+        attemptId: attempt.id,
+        experimentId: attempt.experimentId,
+        terminalSessionId: id,
+        policyId: 'default-passive-policy',
+        severity: 'warning',
+        action: riskyAction,
+        detail: `Passive guardrail warning for terminal input: ${riskyAction}.`,
+      })
+    }
+  }
   const proc = ptyProcesses.get(id)
   if (!proc) {
     const message = '\r\n\x1b[31m[Terminal session is not running]\x1b[0m\r\n'
@@ -642,6 +1148,11 @@ ipcMain.handle('terminal-kill', (_e, id: string) => {
   try { ptyProcesses.get(id)?.kill() } catch { /* already dead */ }
   ptyProcesses.delete(id)
   terminalSessions.delete(id)
+  const timer = terminalOutputTimers.get(id)
+  if (timer) clearTimeout(timer)
+  terminalOutputTimers.delete(id)
+  terminalOutputPreviews.delete(id)
+  updateTerminalAgentStatus(id, 'failed', 'Terminal session was closed.')
 })
 
 // ── App lifecycle ─────────────────────────────────────────────────
@@ -653,9 +1164,11 @@ app.whenReady().then(() => {
       app.dock.setIcon(dockIconPath)
     }
   }
+  createApplicationMenu()
   createWindow()
   createTray()
   codexConversationRevision = getCodexConversationRevision()
+  initAutomationScheduler()
   if (isOllamaConfigured()) ensureOllamaRunning().catch(() => {})
   reconcileCurrentTasks()
   setInterval(reconcileCurrentTasks, 30_000)
@@ -667,6 +1180,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   stopOllamaProcess()
+  shutdownAutomationScheduler()
 })
 
 app.on('window-all-closed', () => {
