@@ -24,9 +24,10 @@ function normalizeWorkspace(raw: Partial<Workspace>): Workspace | null {
   const explicitKind = raw.kind === 'repo' || raw.kind === 'general' ? raw.kind : undefined
   const rawProjectPath = normalizeString(raw.projectPath)
   const repoRoot = rawProjectPath ? findGitRoot(rawProjectPath) : null
-  const kind = explicitKind ?? (repoRoot ? 'repo' : 'general')
+  const projectRoot = repoRoot ?? (rawProjectPath ? directoryForPath(rawProjectPath) : null)
+  const kind = explicitKind ?? (projectRoot ? 'repo' : 'general')
 
-  if (kind === 'repo' && !repoRoot) return null
+  if (kind === 'repo' && !projectRoot) return null
   if (kind === 'general') {
     return {
       id: GENERAL_WORKSPACE_ID,
@@ -37,11 +38,13 @@ function normalizeWorkspace(raw: Partial<Workspace>): Workspace | null {
     }
   }
 
+  const root = projectRoot
+  if (!root) return null
   return {
     id: normalizeString(raw.id) ?? randomUUID(),
-    name: normalizeString(raw.name) ?? (path.basename(repoRoot!) || repoRoot!),
+    name: normalizeString(raw.name) ?? (path.basename(root) || root),
     kind,
-    projectPath: repoRoot!,
+    projectPath: root,
     createdAt,
     updatedAt: normalizeString(raw.updatedAt) ?? createdAt,
   }
@@ -115,7 +118,7 @@ function repoRootsFromItems(conversations: Conversation[], tasks: TaskItem[]): M
   for (const item of [...conversations, ...tasks]) {
     const itemPath = normalizeString(item.projectPath)
     if (!itemPath) continue
-    const repoRoot = findGitRoot(itemPath)
+    const repoRoot = findGitRoot(itemPath) ?? directoryForPath(itemPath)
     if (!repoRoot || repos.has(repoRoot)) continue
     repos.set(repoRoot, path.basename(repoRoot) || repoRoot)
   }
@@ -136,11 +139,8 @@ function generalWorkspace(existing?: Workspace): Workspace {
 export function getWorkspaces(conversations: Conversation[] = [], tasks: TaskItem[] = []): Workspace[] {
   const stored = readStore()
   const general = generalWorkspace(stored.find((workspace) => workspace.kind === 'general'))
-  const existingRepos = new Map(
-    stored
-      .filter((workspace) => workspace.kind === 'repo' && workspace.projectPath)
-      .map((workspace) => [workspace.projectPath!, workspace]),
-  )
+  const storedProjects = stored.filter((workspace) => workspace.kind === 'repo' && workspace.projectPath)
+  const existingRepos = new Map(storedProjects.map((workspace) => [workspace.projectPath!, workspace]))
   const repoRoots = repoRootsFromItems(conversations, tasks)
   const repos = Array.from(repoRoots.entries()).map(([projectPath, name]) => (
     existingRepos.get(projectPath) ?? {
@@ -152,7 +152,7 @@ export function getWorkspaces(conversations: Conversation[] = [], tasks: TaskIte
       updatedAt: nowIso(),
     }
   ))
-  const next = dedupeWorkspaces([general, ...repos])
+  const next = dedupeWorkspaces([general, ...storedProjects, ...repos])
   writeStore(next)
   return next
 }
@@ -163,7 +163,7 @@ export function getWorkspaceById(id: string | undefined): Workspace | null {
 }
 
 export function getWorkspaceForProjectPath(projectPath: string | undefined): Workspace | null {
-  const repoRoot = projectPath ? findGitRoot(projectPath) : null
+  const repoRoot = projectPath ? findGitRoot(projectPath) ?? directoryForPath(projectPath) : null
   const workspaces = readStore()
   if (!repoRoot) {
     const general = workspaces.find((workspace) => workspace.kind === 'general') ?? generalWorkspace()
@@ -183,4 +183,9 @@ export function getWorkspaceForProjectPath(projectPath: string | undefined): Wor
   }
   writeStore(dedupeWorkspaces([created, ...workspaces]))
   return created
+}
+
+export function addWorkspaceForProjectPath(projectPath: string): Workspace[] {
+  getWorkspaceForProjectPath(projectPath)
+  return getWorkspaces()
 }

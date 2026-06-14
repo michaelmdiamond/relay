@@ -3,7 +3,7 @@ import type { KeyboardEvent, MouseEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import type { TerminalLauncherId, TerminalSessionSnapshot } from '../../../shared/types'
+import type { AgentRunEvent, AgentRunSnapshot, AgentRunStatus, TerminalLauncherId, TerminalSessionSnapshot } from '../../../shared/types'
 
 interface Launcher {
   id: TerminalLauncherId
@@ -92,6 +92,216 @@ function dedupeSessions(sessions: TerminalSessionSnapshot[]) {
 
 function upsertSession(sessions: TerminalSessionSnapshot[], session: TerminalSessionSnapshot) {
   return [session, ...sessions.filter((entry) => entry.id !== session.id)]
+}
+
+function statusLabel(status: AgentRunStatus) {
+  if (status === 'done') return 'done'
+  if (status === 'failed') return 'failed'
+  if (status === 'blocked') return 'blocked'
+  if (status === 'queued') return 'queued'
+  return 'running'
+}
+
+function eventLabel(type: string) {
+  if (type === 'agent_started') return 'started'
+  if (type === 'agent_status') return 'status'
+  if (type === 'tool_started') return 'tool'
+  if (type === 'tool_output') return 'note'
+  if (type === 'file_touched') return 'file'
+  if (type === 'agent_finished') return 'finished'
+  return type
+}
+
+function timeLabel(value: string) {
+  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+interface ActivityEntry {
+  id: string
+  createdAt: string
+  kind: string
+  text: string
+  detail?: string
+  tone?: 'good' | 'bad' | 'neutral'
+}
+
+function basename(value: string) {
+  return value.split('/').filter(Boolean).at(-1) ?? value
+}
+
+function eventText(event: AgentRunEvent) {
+  return event.message ?? event.summary ?? event.result ?? event.text ?? event.path ?? event.title ?? ''
+}
+
+function buildActivityTimeline(run: AgentRunSnapshot | null): ActivityEntry[] {
+  if (!run) return []
+
+  const entries: ActivityEntry[] = []
+  const seen = new Set<string>()
+  const files = run.events
+    .filter((event) => event.type === 'file_touched' && event.path)
+    .slice(-6)
+    .map((event) => event.path as string)
+  const uniqueFiles = [...new Set(files)]
+
+  for (const event of [...run.events].reverse()) {
+    const text = eventText(event).trim()
+    if (!text) continue
+
+    let entry: ActivityEntry | null = null
+    if (event.type === 'agent_finished') {
+      entry = {
+        id: event.id,
+        createdAt: event.createdAt,
+        kind: event.status === 'failed' ? 'failed' : 'finished',
+        text,
+        tone: event.status === 'failed' ? 'bad' : 'good',
+      }
+    } else if (event.type === 'file_touched' && event.path) {
+      entry = {
+        id: event.id,
+        createdAt: event.createdAt,
+        kind: event.action ?? 'file',
+        text: basename(event.path),
+        detail: event.path,
+      }
+    } else if (event.type === 'tool_started') {
+      entry = {
+        id: event.id,
+        createdAt: event.createdAt,
+        kind: event.tool ?? eventLabel(event.type),
+        text,
+      }
+    } else if (event.type === 'agent_status') {
+      const looksBad = /\b(error|failed|blocked)\b/i.test(text)
+      entry = {
+        id: event.id,
+        createdAt: event.createdAt,
+        kind: event.status && event.status !== 'running' ? statusLabel(event.status) : 'update',
+        text,
+        tone: event.status === 'failed' || event.status === 'blocked' || looksBad ? 'bad' : 'neutral',
+      }
+    } else if (event.type === 'agent_started') {
+      entry = {
+        id: event.id,
+        createdAt: event.createdAt,
+        kind: 'started',
+        text,
+      }
+    } else if (event.type === 'tool_output' && /\b(error|failed|passed|success|complete|build|test|lint|typecheck)\b/i.test(text)) {
+      entry = {
+        id: event.id,
+        createdAt: event.createdAt,
+        kind: 'result',
+        text,
+        tone: /\b(error|failed)\b/i.test(text) ? 'bad' : /\b(passed|success|complete)\b/i.test(text) ? 'good' : 'neutral',
+      }
+    }
+
+    if (!entry) continue
+    const key = `${entry.kind}|${entry.text}|${entry.detail ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    entries.push(entry)
+    if (entries.length >= 9) break
+  }
+
+  if (uniqueFiles.length > 1) {
+    entries.unshift({
+      id: `${run.id}-files-summary`,
+      createdAt: run.updatedAt,
+      kind: 'files',
+      text: `${uniqueFiles.length} files touched`,
+      detail: uniqueFiles.slice(-4).map(basename).join(', '),
+    })
+  }
+
+  return entries.slice(0, 9)
+}
+
+function AgentMapPanel({
+  session,
+  run,
+}: {
+  session: TerminalSessionSnapshot | null
+  run: AgentRunSnapshot | null
+}) {
+  const agents = run?.agents ?? []
+  const mainAgent = agents.find((agent) => agent.role === 'main') ?? agents[0]
+  const childAgents = mainAgent ? agents.filter((agent) => agent.parentAgentId === mainAgent.id) : []
+  const otherAgents = agents.filter((agent) => agent.id !== mainAgent?.id && !childAgents.includes(agent))
+  const timeline = useMemo(() => buildActivityTimeline(run), [run])
+  if (!run && !session) return null
+
+  return (
+    <aside className="terminal-agent-map" aria-label="Agent activity">
+      <div className="terminal-agent-map__header">
+        <div>
+          <div className="terminal-agent-map__eyebrow">Agent Activity</div>
+          <div className="terminal-agent-map__title">{session?.name ?? 'No session'}</div>
+        </div>
+        {run && <span className={`terminal-agent-map__status terminal-agent-map__status--${run.status}`}>{statusLabel(run.status)}</span>}
+      </div>
+
+      {mainAgent ? (
+        <div className="terminal-agent-tree">
+          <div className="terminal-agent-node terminal-agent-node--main">
+            <div className="terminal-agent-node__rail" />
+            <div className="terminal-agent-node__body">
+              <div className="terminal-agent-node__topline">
+                <span className="terminal-agent-node__name">{mainAgent.title}</span>
+                <span className={`terminal-agent-node__status terminal-agent-node__status--${mainAgent.status}`}>{statusLabel(mainAgent.status)}</span>
+              </div>
+              {mainAgent.message && <div className="terminal-agent-node__message">{mainAgent.message}</div>}
+              {mainAgent.lastOutputPreview && <pre className="terminal-agent-node__preview">{mainAgent.lastOutputPreview}</pre>}
+            </div>
+          </div>
+
+          {[...childAgents, ...otherAgents].map((agent) => (
+            <div key={agent.id} className="terminal-agent-node terminal-agent-node--child">
+              <div className="terminal-agent-node__rail" />
+              <div className="terminal-agent-node__body">
+                <div className="terminal-agent-node__topline">
+                  <span className="terminal-agent-node__name">{agent.title}</span>
+                  <span className={`terminal-agent-node__status terminal-agent-node__status--${agent.status}`}>{statusLabel(agent.status)}</span>
+                </div>
+                {agent.message && <div className="terminal-agent-node__message">{agent.message}</div>}
+                {agent.filesTouched.length > 0 && (
+                  <div className="terminal-agent-node__files">
+                    {agent.filesTouched.slice(-3).map((path) => <span key={path}>{path.split('/').at(-1)}</span>)}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {childAgents.length === 0 && otherAgents.length === 0 && (
+            <div className="terminal-agent-map__empty">No subagents reported yet.</div>
+          )}
+        </div>
+      ) : (
+        <div className="terminal-agent-map__empty">Start or select a session.</div>
+      )}
+
+      <div className="terminal-agent-timeline">
+        <div className="terminal-agent-timeline__title">Recent Activity</div>
+        {timeline.length > 0 ? timeline.map((event) => {
+          return (
+            <div key={event.id} className={`terminal-agent-event${event.tone ? ` terminal-agent-event--${event.tone}` : ''}`}>
+              <span className="terminal-agent-event__time">{timeLabel(event.createdAt)}</span>
+              <span className="terminal-agent-event__kind">{event.kind}</span>
+              <span className="terminal-agent-event__text">
+                <span>{event.text}</span>
+                {event.detail && <small>{event.detail}</small>}
+              </span>
+            </div>
+          )
+        }) : (
+          <div className="terminal-agent-map__empty">No activity captured yet.</div>
+        )}
+      </div>
+    </aside>
+  )
 }
 
 interface TerminalViewProps {
@@ -441,6 +651,7 @@ export function TerminalsPane({
   const [launchError, setLaunchError] = useState('')
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false)
+  const [agentRuns, setAgentRuns] = useState<Record<string, AgentRunSnapshot>>({})
   const createMenuRef = useRef<HTMLDivElement>(null)
   const layoutMenuRef = useRef<HTMLDivElement>(null)
 
@@ -605,6 +816,30 @@ export function TerminalsPane({
   }
 
   const visibleSessions = workspaceSessions.filter((session) => visibleSessionIds.has(session.id))
+  const activeSession = activeSessionId
+    ? workspaceSessions.find((session) => session.id === activeSessionId) ?? null
+    : workspaceSessions[0] ?? null
+  const activeAgentRun = activeSession ? agentRuns[activeSession.id] ?? null : null
+
+  useEffect(() => {
+    if (!activeSession) return
+    let canceled = false
+    window.terminalApi.getAgentRunForTerminal(activeSession.id).then((run) => {
+      if (canceled || !run?.terminalSessionId) return
+      setAgentRuns((current) => ({ ...current, [run.terminalSessionId as string]: run }))
+    })
+    return () => {
+      canceled = true
+    }
+  }, [activeSession?.id])
+
+  useEffect(() => {
+    const unsubscribe = window.terminalApi.onAgentRunUpdated((run) => {
+      if (!run.terminalSessionId) return
+      setAgentRuns((current) => ({ ...current, [run.terminalSessionId as string]: run }))
+    })
+    return unsubscribe
+  }, [])
 
   return (
     <div className="terminals-view">
@@ -810,6 +1045,7 @@ export function TerminalsPane({
           </div>
         )}
       </section>
+      <AgentMapPanel session={activeSession} run={activeAgentRun} />
     </div>
   )
 }

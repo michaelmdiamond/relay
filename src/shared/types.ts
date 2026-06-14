@@ -17,6 +17,10 @@ export const CODEX_MODELS = [
 export type CodexModel = typeof CODEX_MODELS[number] | (string & {})
 
 export type GeminiModel =
+  | 'gemini-3.5-flash'
+  | 'gemini-3.1-pro-preview'
+  | 'gemini-3-flash-preview'
+  | 'gemini-3.1-flash-lite'
   | 'gemini-2.5-pro'
   | 'gemini-2.5-flash'
   | 'gemini-2.5-flash-lite'
@@ -280,8 +284,249 @@ export interface TerminalBufferSnapshot {
   sequence: number
 }
 
+export type AgentRunStatus = 'queued' | 'running' | 'blocked' | 'done' | 'failed'
+export type AgentRunEventType = 'agent_started' | 'agent_status' | 'tool_started' | 'tool_output' | 'file_touched' | 'agent_finished'
+export type AgentRunEventStream = 'stdout' | 'stderr'
+
+export interface AgentRunNode {
+  id: string
+  title: string
+  provider?: TerminalLauncherId | WorkflowAgentProvider
+  role: 'main' | 'subagent'
+  parentAgentId?: string
+  status: AgentRunStatus
+  message?: string
+  startedAt: string
+  updatedAt: string
+  completedAt?: string
+  filesTouched: string[]
+  lastOutputPreview?: string
+}
+
+export interface AgentRunEvent {
+  id: string
+  runId: string
+  agentId: string
+  parentAgentId?: string
+  type: AgentRunEventType
+  createdAt: string
+  title?: string
+  status?: AgentRunStatus
+  message?: string
+  tool?: string
+  summary?: string
+  text?: string
+  stream?: AgentRunEventStream
+  path?: string
+  action?: 'read' | 'edit' | 'create' | 'delete'
+  result?: string
+}
+
+export interface AgentRunSnapshot {
+  id: string
+  terminalSessionId?: string
+  workflowRunId?: string
+  workspaceId?: string
+  title: string
+  status: AgentRunStatus
+  createdAt: string
+  updatedAt: string
+  agents: AgentRunNode[]
+  events: AgentRunEvent[]
+}
+
 export type TaskState = 'idea' | 'running' | 'blocked' | 'review' | 'done'
 export type TaskSignal = 'active' | 'idle' | 'waiting' | 'exited' | 'failed' | 'stale' | 'complete'
+
+export type ExperimentStatus = 'draft' | 'running' | 'reviewing' | 'completed' | 'archived'
+export type AttemptStatus = 'not_started' | 'running' | 'succeeded' | 'failed' | 'inconclusive'
+export type AgentAttemptProvider = 'codex' | 'claude' | 'gemini' | 'cursor' | 'ollama' | 'warp' | 'lovable' | 'manual'
+export type ExperimentScore = 1 | 2 | 3 | 4 | 5
+
+export interface ExperimentCase {
+  id: string
+  title: string
+  brief: string
+  workspaceId?: string
+  projectName?: string
+  projectPath?: string
+  status: ExperimentStatus
+  successCriteria: string[]
+  recommendedChecks: string[]
+  tags: string[]
+  createdAt: string
+  updatedAt: string
+  archivedAt?: string
+}
+
+export interface ExperimentAttemptScores {
+  correctness?: ExperimentScore
+  speed?: ExperimentScore
+  autonomy?: ExperimentScore
+  codeQuality?: ExperimentScore
+  instructionFollowing?: ExperimentScore
+}
+
+export interface ExperimentAttempt {
+  id: string
+  experimentId: string
+  provider: AgentAttemptProvider
+  model?: string
+  status: AttemptStatus
+  taskId?: string
+  conversationId?: string
+  terminalSessionId?: string
+  workflowRunId?: string
+  startedAt?: string
+  completedAt?: string
+  durationMs?: number
+  costEstimateUsd?: number
+  tokenUsage?: TokenUsage
+  testsRun: string[]
+  filesTouched: string[]
+  evidence: string[]
+  outcomeNotes: string
+  scores: ExperimentAttemptScores
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ExperimentRunEventSummary {
+  id: string
+  sourceEventId?: string
+  type: AgentRunEventType
+  createdAt: string
+  title?: string
+  status?: AgentRunStatus
+  summary: string
+  filePath?: string
+}
+
+export interface ExperimentRunEvidence {
+  id: string
+  attemptId: string
+  experimentId: string
+  runId?: string
+  terminalSessionId?: string
+  workflowRunId?: string
+  provider?: AgentAttemptProvider | TerminalLauncherId | WorkflowAgentProvider
+  title: string
+  status: AgentRunStatus
+  prompt?: string
+  filesTouched: string[]
+  testsRun: string[]
+  eventSummaries: ExperimentRunEventSummary[]
+  exitState?: string
+  elapsedMs?: number
+  finalNotes?: string
+  createdAt: string
+  updatedAt: string
+  completedAt?: string
+}
+
+export interface GuardrailPolicy {
+  id: string
+  name: string
+  mode: 'passive' | 'enforcing'
+  allowedWorkspacePaths: string[]
+  blockedCommandPatterns: string[]
+  approvalRequiredActions: string[]
+  requiredChecksAfterEdits: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface GuardrailEvent {
+  id: string
+  attemptId?: string
+  experimentId?: string
+  terminalSessionId?: string
+  policyId?: string
+  severity: 'info' | 'warning' | 'blocked'
+  action: string
+  detail: string
+  createdAt: string
+}
+
+export interface McpContextUsage {
+  id: string
+  attemptId?: string
+  experimentId?: string
+  toolName: string
+  query?: string
+  summary: string
+  createdAt: string
+}
+
+export interface ExperimentPostmortem {
+  id: string
+  experimentId: string
+  title: string
+  markdown: string
+  exportedPath?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ExperimentStoreSnapshot {
+  cases: ExperimentCase[]
+  attempts: ExperimentAttempt[]
+  runEvidence: ExperimentRunEvidence[]
+  guardrailPolicies: GuardrailPolicy[]
+  guardrailEvents: GuardrailEvent[]
+  mcpContextUsages: McpContextUsage[]
+  postmortems: ExperimentPostmortem[]
+}
+
+export interface ExperimentCaseInput {
+  title: string
+  brief?: string
+  workspaceId?: string
+  projectName?: string
+  projectPath?: string
+  status?: ExperimentStatus
+  successCriteria?: string[]
+  recommendedChecks?: string[]
+  tags?: string[]
+}
+
+export type ExperimentCaseUpdateInput = Partial<ExperimentCaseInput>
+
+export interface ExperimentAttemptInput {
+  provider: AgentAttemptProvider
+  model?: string
+  status?: AttemptStatus
+  taskId?: string
+  conversationId?: string
+  terminalSessionId?: string
+  workflowRunId?: string
+  startedAt?: string
+  completedAt?: string
+  durationMs?: number
+  costEstimateUsd?: number
+  tokenUsage?: TokenUsage
+  testsRun?: string[]
+  filesTouched?: string[]
+  evidence?: string[]
+  outcomeNotes?: string
+  scores?: ExperimentAttemptScores
+}
+
+export type ExperimentAttemptUpdateInput = Partial<ExperimentAttemptInput>
+
+export interface ExperimentEvidenceLinks {
+  taskId?: string
+  conversationId?: string
+  terminalSessionId?: string
+  workflowRunId?: string
+  evidence?: string[]
+  filesTouched?: string[]
+  testsRun?: string[]
+}
+
+export interface ExperimentPostmortemInput {
+  exportMarkdown?: boolean
+}
 
 export interface TaskItem {
   id: string
@@ -334,7 +579,7 @@ export interface PromoteConversationToTaskInput {
   state?: TaskState
 }
 
-export type WorkflowAgentProvider = 'anthropic' | 'openai' | 'google'
+export type WorkflowAgentProvider = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'ollama' | 'cursor'
 export type WorkflowAgentRole = 'implementer' | 'reviewer'
 export type WorkflowRunStatus = 'queued' | 'running' | 'completed' | 'failed'
 export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -348,7 +593,38 @@ export interface AgentProfile {
   model: string
   role: WorkflowAgentRole
   systemPrompt: string
+  foundationPrompt?: string
+  setupCompletedAt?: string
   enabled: boolean
+}
+
+export interface AgentKnowledgeEntry {
+  id: string
+  agentId: string
+  sourcePrompt: string
+  content: string
+  createdAt: string
+}
+
+export interface AgentProfileRun {
+  id: string
+  agentId: string
+  agentName: string
+  prompt: string
+  output: string
+  savedToKnowledge: boolean
+  status: 'completed' | 'failed'
+  createdAt: string
+  completedAt: string
+  error?: string
+}
+
+export interface RunAgentProfileInput {
+  agentId: string
+  prompt: string
+  workspaceId?: string
+  saveToKnowledge?: boolean
+  setupRun?: boolean
 }
 
 export interface WorkflowDefinition {
@@ -405,6 +681,33 @@ export interface WorkflowRun {
 export type AutomationCatalogSource = 'relay' | 'codex' | 'claude'
 export type AutomationCatalogKind = 'agent' | 'workflow' | 'scheduled-task'
 export type AutomationCatalogStatus = 'active' | 'paused' | 'available' | 'detected'
+
+export interface ScheduledAutomationRun {
+  conversationId: string
+  ranAt: string
+}
+
+export interface ScheduledAutomation {
+  id: string
+  title: string
+  prompt: string
+  model: ModelChoice
+  schedule: string
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+  lastRunAt?: string
+  nextRunAt?: string
+  runCount: number
+  lastRuns?: ScheduledAutomationRun[]
+}
+
+export interface ScheduledAutomationInput {
+  title: string
+  prompt: string
+  model: ModelChoice
+  schedule: string
+}
 
 export interface AutomationCatalogItem {
   id: string
@@ -470,6 +773,7 @@ export interface CodexStatusSnapshot {
 export interface TerminalApi {
   listTerminalSessions: () => Promise<TerminalSessionSnapshot[]>
   getTerminalBuffer: (id: string) => Promise<TerminalBufferSnapshot>
+  getAgentRunForTerminal: (terminalSessionId: string) => Promise<AgentRunSnapshot | null>
   createTerminal: (id: string, launcherId: TerminalLauncherId, name: string, cwd?: string, taskId?: string, workspaceId?: string) => Promise<TerminalSessionSnapshot>
   sendTerminalInput: (id: string, data: string) => void
   resizeTerminal: (id: string, cols: number, rows: number) => void
@@ -478,15 +782,18 @@ export interface TerminalApi {
   onTerminalCreated: (cb: (session: TerminalSessionSnapshot) => void) => () => void
   onTerminalData: (cb: (id: string, data: string, sequence: number) => void) => () => void
   onTerminalExit: (cb: (id: string, code: number) => void) => () => void
+  onAgentRunUpdated: (cb: (run: AgentRunSnapshot) => void) => () => void
 }
 
 export interface ChatApi {
   getApiKeyStatus: () => Promise<{ configured: boolean }>
   setApiKey: (key: string) => Promise<void>
   getWorkspaces: () => Promise<Workspace[]>
+  addWorkspaceForPath: (projectPath: string) => Promise<Workspace[]>
   getConversations: () => Promise<Conversation[]>
   getConnectorInventory: () => Promise<ConnectorInventory>
   getSkills: () => Promise<SkillEntry[]>
+  restartApp: () => Promise<void>
   getUsageLimits: () => Promise<UsageLimitSettings>
   saveUsageLimits: (limits: UsageLimitSettings) => Promise<UsageLimitSettings>
   getTasks: () => Promise<TaskItem[]>
@@ -497,6 +804,14 @@ export interface ChatApi {
   promoteConversationToTask: (conversationId: string, input?: PromoteConversationToTaskInput) => Promise<TaskItem>
   startTaskTerminal: (taskId: string, launcherId: TerminalLauncherId) => Promise<TerminalSessionSnapshot>
   startTaskWorkflow: (taskId: string) => Promise<WorkflowRun>
+  getExperiments: () => Promise<ExperimentStoreSnapshot>
+  createExperimentCase: (input: ExperimentCaseInput) => Promise<ExperimentCase>
+  updateExperimentCase: (id: string, input: ExperimentCaseUpdateInput) => Promise<ExperimentCase | null>
+  archiveExperimentCase: (id: string) => Promise<ExperimentCase | null>
+  createExperimentAttempt: (experimentId: string, input: ExperimentAttemptInput) => Promise<ExperimentAttempt>
+  updateExperimentAttempt: (id: string, input: ExperimentAttemptUpdateInput) => Promise<ExperimentAttempt | null>
+  linkAttemptEvidence: (attemptId: string, links: ExperimentEvidenceLinks) => Promise<ExperimentAttempt | null>
+  generateExperimentPostmortem: (experimentId: string, input?: ExperimentPostmortemInput) => Promise<ExperimentPostmortem>
   sendMessage: (conversationId: string, content: string, modelChoice: ModelChoice, options?: SendMessageOptions) => Promise<void>
   newConversation: (workspaceId?: string) => Promise<Conversation>
   deleteConversation: (id: string) => Promise<void>
@@ -551,15 +866,26 @@ export interface ChatApi {
   onCanceled: (cb: (conversationId: string, messageId: string) => void) => () => void
   onConversationsUpdated: (cb: (conversations: Conversation[]) => void) => () => void
   onTasksUpdated: (cb: (tasks: TaskItem[]) => void) => () => void
+  onExperimentsUpdated: (cb: (snapshot: ExperimentStoreSnapshot) => void) => () => void
   onCodexStatusUpdated: (cb: (snapshot: CodexStatusSnapshot) => void) => () => void
   onCodexThreadFocusRequested: (cb: (conversationId: string) => void) => () => void
 
   getAgentProfiles: () => Promise<AgentProfile[]>
   saveAgentProfile: (profile: AgentProfile) => Promise<AgentProfile[]>
+  deleteAgentProfile: (id: string) => Promise<AgentProfile[]>
+  getAgentKnowledge: (agentId: string) => Promise<AgentKnowledgeEntry[]>
+  getAgentRuns: (agentId: string) => Promise<AgentProfileRun[]>
+  runAgentProfile: (input: RunAgentProfileInput) => Promise<AgentProfileRun>
   getWorkflowDefinitions: () => Promise<WorkflowDefinition[]>
   getWorkflowRuns: () => Promise<WorkflowRun[]>
   startWorkflowRun: (workflowId: string, goal: string, workspaceId?: string) => Promise<WorkflowRun>
   getAutomationCatalog: () => Promise<AutomationCatalogSnapshot>
+  getScheduledAutomations: () => Promise<ScheduledAutomation[]>
+  createScheduledAutomation: (input: ScheduledAutomationInput) => Promise<ScheduledAutomation>
+  updateScheduledAutomation: (id: string, input: Partial<ScheduledAutomationInput & { enabled: boolean }>) => Promise<ScheduledAutomation | null>
+  deleteScheduledAutomation: (id: string) => Promise<boolean>
+  runAutomationNow: (id: string) => Promise<void>
+  onScheduledAutomationsUpdated: (cb: (automations: ScheduledAutomation[]) => void) => () => void
   onWorkflowRunUpdated: (cb: (run: WorkflowRun) => void) => () => void
 }
 

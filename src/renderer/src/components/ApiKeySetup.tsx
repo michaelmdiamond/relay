@@ -381,7 +381,7 @@ export function ApiKeySetup({ onSaved }: Props) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>Google</span>
             <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
-              Gemini 2.5 Pro ·{' '}
+              Gemini 3.5 Flash ·{' '}
               <a
                 href="https://aistudio.google.com/apikey"
                 target="_blank"

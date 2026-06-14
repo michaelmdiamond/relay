@@ -12,7 +12,7 @@ interface CursorConfig {
   model?: string
 }
 
-const DEFAULT_CURSOR_MODEL = 'auto'
+const DEFAULT_CURSOR_MODEL = 'composer-2'
 const LEGACY_DEFAULT_CURSOR_MODEL = 'composer-2'
 
 function readConfig(): CursorConfig | null {
@@ -38,7 +38,7 @@ export function isCursorConnected(): { configured: boolean; userEmail?: string; 
 
 export function saveCursorKey(apiKey: string): void {
   const existing = readConfig()
-  const existingModel = existing?.model === LEGACY_DEFAULT_CURSOR_MODEL ? DEFAULT_CURSOR_MODEL : existing?.model
+  const existingModel = existing?.model === 'auto' ? DEFAULT_CURSOR_MODEL : existing?.model
   writeConfig({ ...existing, apiKey, model: existingModel ?? DEFAULT_CURSOR_MODEL })
 }
 
@@ -54,7 +54,7 @@ export function disconnectCursor(): void {
 
 export function getCursorModel(): string {
   const model = readConfig()?.model
-  return model === LEGACY_DEFAULT_CURSOR_MODEL ? DEFAULT_CURSOR_MODEL : (model ?? DEFAULT_CURSOR_MODEL)
+  return !model || model === 'auto' ? DEFAULT_CURSOR_MODEL : model
 }
 
 export function saveCursorModel(model: string): void {

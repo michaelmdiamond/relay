@@ -30,9 +30,13 @@ const CODEX_MODEL_META: Record<string, { label: string; sub: string }> = {
 }
 
 const GEMINI_MODELS: { value: GeminiModel; label: string; sub: string }[] = [
-  { value: 'gemini-2.5-flash',      label: 'Flash',      sub: 'fast · free' },
-  { value: 'gemini-2.5-flash-lite', label: 'Flash-Lite', sub: 'fastest · free' },
-  { value: 'gemini-2.5-pro',        label: 'Pro',        sub: 'most capable' },
+  { value: 'gemini-3.5-flash',      label: '3.5 Flash',      sub: 'stable · agentic' },
+  { value: 'gemini-3.1-pro-preview', label: '3.1 Pro',       sub: 'preview · reasoning' },
+  { value: 'gemini-3-flash-preview', label: '3 Flash',       sub: 'preview · fast' },
+  { value: 'gemini-3.1-flash-lite', label: '3.1 Flash-Lite', sub: 'cost efficient' },
+  { value: 'gemini-2.5-flash',      label: '2.5 Flash',      sub: 'legacy stable' },
+  { value: 'gemini-2.5-flash-lite', label: '2.5 Flash-Lite', sub: 'legacy fast' },
+  { value: 'gemini-2.5-pro',        label: '2.5 Pro',        sub: 'legacy capable' },
 ]
 
 const DEEPSEEK_MODELS: { value: DeepSeekModel; label: string; sub: string }[] = [

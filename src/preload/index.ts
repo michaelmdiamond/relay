@@ -5,9 +5,11 @@ const api: ChatApi = {
   getApiKeyStatus: () => ipcRenderer.invoke('get-api-key-status'),
   setApiKey: (key) => ipcRenderer.invoke('set-api-key', key),
   getWorkspaces: () => ipcRenderer.invoke('get-workspaces'),
+  addWorkspaceForPath: (projectPath) => ipcRenderer.invoke('add-workspace-for-path', projectPath),
   getConversations: () => ipcRenderer.invoke('get-conversations'),
   getConnectorInventory: () => ipcRenderer.invoke('get-connector-inventory'),
   getSkills: () => ipcRenderer.invoke('get-skills'),
+  restartApp: () => ipcRenderer.invoke('restart-app'),
   getUsageLimits: () => ipcRenderer.invoke('get-usage-limits'),
   saveUsageLimits: (limits) => ipcRenderer.invoke('save-usage-limits', limits),
   getTasks: () => ipcRenderer.invoke('get-tasks'),
@@ -18,12 +20,29 @@ const api: ChatApi = {
   promoteConversationToTask: (conversationId, input) => ipcRenderer.invoke('promote-conversation-to-task', conversationId, input),
   startTaskTerminal: (taskId, launcherId) => ipcRenderer.invoke('start-task-terminal', taskId, launcherId),
   startTaskWorkflow: (taskId) => ipcRenderer.invoke('start-task-workflow', taskId),
+  getExperiments: () => ipcRenderer.invoke('get-experiments'),
+  createExperimentCase: (input) => ipcRenderer.invoke('create-experiment-case', input),
+  updateExperimentCase: (id, input) => ipcRenderer.invoke('update-experiment-case', id, input),
+  archiveExperimentCase: (id) => ipcRenderer.invoke('archive-experiment-case', id),
+  createExperimentAttempt: (experimentId, input) => ipcRenderer.invoke('create-experiment-attempt', experimentId, input),
+  updateExperimentAttempt: (id, input) => ipcRenderer.invoke('update-experiment-attempt', id, input),
+  linkAttemptEvidence: (attemptId, links) => ipcRenderer.invoke('link-attempt-evidence', attemptId, links),
+  generateExperimentPostmortem: (experimentId, input) => ipcRenderer.invoke('generate-experiment-postmortem', experimentId, input),
   getAgentProfiles: () => ipcRenderer.invoke('get-agent-profiles'),
   saveAgentProfile: (profile) => ipcRenderer.invoke('save-agent-profile', profile),
+  deleteAgentProfile: (id) => ipcRenderer.invoke('delete-agent-profile', id),
+  getAgentKnowledge: (agentId) => ipcRenderer.invoke('get-agent-knowledge', agentId),
+  getAgentRuns: (agentId) => ipcRenderer.invoke('get-agent-runs', agentId),
+  runAgentProfile: (input) => ipcRenderer.invoke('run-agent-profile', input),
   getWorkflowDefinitions: () => ipcRenderer.invoke('get-workflow-definitions'),
   getWorkflowRuns: () => ipcRenderer.invoke('get-workflow-runs'),
   startWorkflowRun: (workflowId, goal, workspaceId) => ipcRenderer.invoke('start-workflow-run', workflowId, goal, workspaceId),
   getAutomationCatalog: () => ipcRenderer.invoke('get-automation-catalog'),
+  getScheduledAutomations: () => ipcRenderer.invoke('get-scheduled-automations'),
+  createScheduledAutomation: (input) => ipcRenderer.invoke('create-scheduled-automation', input),
+  updateScheduledAutomation: (id, input) => ipcRenderer.invoke('update-scheduled-automation', id, input),
+  deleteScheduledAutomation: (id) => ipcRenderer.invoke('delete-scheduled-automation', id),
+  runAutomationNow: (id) => ipcRenderer.invoke('run-automation-now', id),
   sendMessage: (conversationId, content, modelChoice, options) =>
     ipcRenderer.invoke('send-message', conversationId, content, modelChoice, options),
   newConversation: (workspaceId) => ipcRenderer.invoke('new-conversation', workspaceId),
@@ -120,6 +139,12 @@ const api: ChatApi = {
     return () => ipcRenderer.off('tasks-updated', listener)
   },
 
+  onExperimentsUpdated: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, snapshot: unknown) => cb(snapshot as never)
+    ipcRenderer.on('experiments-updated', listener)
+    return () => ipcRenderer.off('experiments-updated', listener)
+  },
+
   onCodexStatusUpdated: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, snapshot: unknown) => cb(snapshot as never)
     ipcRenderer.on('codex-status-updated', listener)
@@ -137,6 +162,12 @@ const api: ChatApi = {
     ipcRenderer.on('workflow-run-updated', listener)
     return () => ipcRenderer.off('workflow-run-updated', listener)
   },
+
+  onScheduledAutomationsUpdated: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, automations: unknown) => cb(automations as never)
+    ipcRenderer.on('scheduled-automations-updated', listener)
+    return () => ipcRenderer.off('scheduled-automations-updated', listener)
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)
@@ -144,6 +175,7 @@ contextBridge.exposeInMainWorld('api', api)
 const terminalApi: TerminalApi = {
   listTerminalSessions: () => ipcRenderer.invoke('terminal-list'),
   getTerminalBuffer: (id) => ipcRenderer.invoke('terminal-buffer', id),
+  getAgentRunForTerminal: (id) => ipcRenderer.invoke('terminal-agent-run', id),
   createTerminal: (id, launcherId, name, cwd, taskId, workspaceId) => ipcRenderer.invoke('terminal-create', id, launcherId, name, cwd, taskId, workspaceId),
   sendTerminalInput: (id, data) => ipcRenderer.send('terminal-input', id, data),
   resizeTerminal: (id, cols, rows) => ipcRenderer.send('terminal-resize', id, cols, rows),
@@ -166,6 +198,12 @@ const terminalApi: TerminalApi = {
     const listener = (_e: Electron.IpcRendererEvent, id: string, code: number) => cb(id, code)
     ipcRenderer.on('terminal-exit', listener)
     return () => ipcRenderer.off('terminal-exit', listener)
+  },
+
+  onAgentRunUpdated: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, run: unknown) => cb(run as never)
+    ipcRenderer.on('agent-run-updated', listener)
+    return () => ipcRenderer.off('agent-run-updated', listener)
   },
 }
 
