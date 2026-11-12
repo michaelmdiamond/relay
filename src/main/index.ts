@@ -1,4 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Tray } from 'electron'
+import { pathToFileURL } from "url"
+import { createTrustedIpc, isTrustedRendererUrl, externalBrowserUrl } from "./ipc-security"
+import { app, BrowserWindow, dialog, ipcMain, shell, Menu, nativeImage, nativeTheme, Tray } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -92,6 +94,8 @@ nativeTheme.themeSource = 'dark'
 app.commandLine.appendSwitch('log-level', '3')
 
 let win: BrowserWindow | null = null
+const rendererUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:5173/' : pathToFileURL(path.join(__dirname, '../renderer/index.html')).href
+const trustedIpc = createTrustedIpc(ipcMain, () => win, rendererUrl)
 let tray: Tray | null = null
 let pendingCodexFocusConversationId: string | null = null
 
@@ -137,8 +141,23 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   })
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    const external = externalBrowserUrl(url)
+    if (external) void shell.openExternal(external)
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedRendererUrl(url, rendererUrl)) {
+      event.preventDefault()
+      const external = externalBrowserUrl(url)
+      if (external) void shell.openExternal(external)
+    }
+  })
+  win.webContents.on('will-attach-webview', event => event.preventDefault())
 
   win.on('closed', () => {
     win = null
@@ -337,47 +356,47 @@ function createTray(): void {
 
 // ── IPC ──────────────────────────────────────────────────────────
 
-ipcMain.handle('get-api-key-status', () => ({ configured: isApiKeyConfigured() }))
-ipcMain.handle('set-api-key', (_e, key: string) => saveApiKey(key))
-ipcMain.handle('get-workspaces', () => getWorkspaces(getConversations(terminalSnapshots(), getTasks()), getTasks()))
-ipcMain.handle('add-workspace-for-path', (_e, projectPath: string) => addWorkspaceForProjectPath(projectPath))
-ipcMain.handle('get-conversations', () => getConversations(terminalSnapshots(), getTasks()))
-ipcMain.handle('get-connector-inventory', () => getConnectorInventory())
-ipcMain.handle('get-skills', () => getSkills())
-ipcMain.handle('get-usage-limits', () => getUsageLimits())
-ipcMain.handle('save-usage-limits', (_e, limits) => saveUsageLimits(limits))
-ipcMain.handle('get-tasks', () => {
+trustedIpc.handle('get-api-key-status', () => ({ configured: isApiKeyConfigured() }))
+trustedIpc.handle('set-api-key', (_e, key: string) => saveApiKey(key))
+trustedIpc.handle('get-workspaces', () => getWorkspaces(getConversations(terminalSnapshots(), getTasks()), getTasks()))
+trustedIpc.handle('add-workspace-for-path', (_e, projectPath: string) => addWorkspaceForProjectPath(projectPath))
+trustedIpc.handle('get-conversations', () => getConversations(terminalSnapshots(), getTasks()))
+trustedIpc.handle('get-connector-inventory', () => getConnectorInventory())
+trustedIpc.handle('get-skills', () => getSkills())
+trustedIpc.handle('get-usage-limits', () => getUsageLimits())
+trustedIpc.handle('save-usage-limits', (_e, limits) => saveUsageLimits(limits))
+trustedIpc.handle('get-tasks', () => {
   reconcileCurrentTasks()
   return getTasks()
 })
-ipcMain.handle('create-task', (_e, input) => {
+trustedIpc.handle('create-task', (_e, input) => {
   const task = createTask(input)
   reconcileCurrentTasks()
   return task
 })
-ipcMain.handle('update-task', (_e, id: string, input) => {
+trustedIpc.handle('update-task', (_e, id: string, input) => {
   const task = updateTask(id, input)
   reconcileCurrentTasks()
   return task
 })
-ipcMain.handle('update-task-state', (_e, id: string, state) => {
+trustedIpc.handle('update-task-state', (_e, id: string, state) => {
   const task = updateTaskState(id, state)
   reconcileCurrentTasks()
   return task
 })
-ipcMain.handle('archive-task', (_e, id: string) => {
+trustedIpc.handle('archive-task', (_e, id: string) => {
   const task = archiveTask(id)
   reconcileCurrentTasks()
   return task
 })
-ipcMain.handle('promote-conversation-to-task', (_e, conversationId: string, input) => {
+trustedIpc.handle('promote-conversation-to-task', (_e, conversationId: string, input) => {
   const conversation = getConversations(terminalSnapshots(), getTasks()).find((conv) => conv.id === conversationId)
   if (!conversation) throw new Error('Conversation not found.')
   const task = promoteConversationToTask(conversation, input)
   reconcileCurrentTasks()
   return task
 })
-ipcMain.handle('start-task-terminal', (_e, taskId: string, launcherId: TerminalLauncherId) => {
+trustedIpc.handle('start-task-terminal', (_e, taskId: string, launcherId: TerminalLauncherId) => {
   const task = getTasks().find((entry) => entry.id === taskId)
   if (!task) throw new Error('Task not found.')
   const inferredWorkspaceId = task.workspaceId ?? getWorkspaceForProjectPath(task.projectPath)?.id
@@ -393,7 +412,7 @@ ipcMain.handle('start-task-terminal', (_e, taskId: string, launcherId: TerminalL
   reconcileCurrentTasks()
   return session
 })
-ipcMain.handle('start-task-workflow', (_e, taskId: string) => {
+trustedIpc.handle('start-task-workflow', (_e, taskId: string) => {
   const task = getTasks().find((entry) => entry.id === taskId)
   if (!task) throw new Error('Task not found.')
   const workflow = getWorkflowDefinitions()[0]
@@ -404,34 +423,34 @@ ipcMain.handle('start-task-workflow', (_e, taskId: string) => {
   reconcileCurrentTasks()
   return run
 })
-ipcMain.handle('get-experiments', () => getExperiments())
-ipcMain.handle('create-experiment-case', (_e, input) => createExperimentCase(input))
-ipcMain.handle('update-experiment-case', (_e, id: string, input) => updateExperimentCase(id, input))
-ipcMain.handle('archive-experiment-case', (_e, id: string) => archiveExperimentCase(id))
-ipcMain.handle('create-experiment-attempt', (_e, experimentId: string, input) => createExperimentAttempt(experimentId, input))
-ipcMain.handle('update-experiment-attempt', (_e, id: string, input) => updateExperimentAttempt(id, input))
-ipcMain.handle('link-attempt-evidence', (_e, attemptId: string, links) => linkAttemptEvidence(attemptId, links))
-ipcMain.handle('generate-experiment-postmortem', (_e, experimentId: string, input) => generateExperimentPostmortem(experimentId, input))
-ipcMain.handle('update-conversation-memory', (_e, conversationId: string, memory) => updateConversationMemory(conversationId, memory))
-ipcMain.handle('compact-conversation', (_e, conversationId: string) => compactConversation(conversationId))
-ipcMain.handle('estimate-tokens', (_e, text: string) => estimateTokens(text))
-ipcMain.handle('restart-app', () => restartRelay())
-ipcMain.handle('get-agent-profiles', () => getAgentProfiles())
-ipcMain.handle('save-agent-profile', (_e, profile) => saveAgentProfile(profile))
-ipcMain.handle('delete-agent-profile', (_e, id: string) => deleteAgentProfile(id))
-ipcMain.handle('get-agent-knowledge', (_e, agentId: string) => getAgentKnowledge(agentId))
-ipcMain.handle('get-agent-runs', (_e, agentId: string) => getAgentRuns(agentId))
-ipcMain.handle('run-agent-profile', (_e, input) => runAgentProfile(input))
-ipcMain.handle('get-workflow-definitions', () => getWorkflowDefinitions())
-ipcMain.handle('get-workflow-runs', () => getWorkflowRuns())
-ipcMain.handle('start-workflow-run', (_e, workflowId: string, goal: string, workspaceId?: string) => startWorkflowRun(workflowId, goal, workspaceId))
-ipcMain.handle('get-automation-catalog', () => getAutomationCatalog())
-ipcMain.handle('get-scheduled-automations', () => getScheduledAutomations())
-ipcMain.handle('create-scheduled-automation', (_e, input) => createScheduledAutomation(input))
-ipcMain.handle('update-scheduled-automation', (_e, id: string, input) => updateScheduledAutomation(id, input))
-ipcMain.handle('delete-scheduled-automation', (_e, id: string) => deleteScheduledAutomation(id))
-ipcMain.handle('run-automation-now', (_e, id: string) => runAutomationNow(id))
-ipcMain.handle('new-conversation', (_e, workspaceId?: string) => {
+trustedIpc.handle('get-experiments', () => getExperiments())
+trustedIpc.handle('create-experiment-case', (_e, input) => createExperimentCase(input))
+trustedIpc.handle('update-experiment-case', (_e, id: string, input) => updateExperimentCase(id, input))
+trustedIpc.handle('archive-experiment-case', (_e, id: string) => archiveExperimentCase(id))
+trustedIpc.handle('create-experiment-attempt', (_e, experimentId: string, input) => createExperimentAttempt(experimentId, input))
+trustedIpc.handle('update-experiment-attempt', (_e, id: string, input) => updateExperimentAttempt(id, input))
+trustedIpc.handle('link-attempt-evidence', (_e, attemptId: string, links) => linkAttemptEvidence(attemptId, links))
+trustedIpc.handle('generate-experiment-postmortem', (_e, experimentId: string, input) => generateExperimentPostmortem(experimentId, input))
+trustedIpc.handle('update-conversation-memory', (_e, conversationId: string, memory) => updateConversationMemory(conversationId, memory))
+trustedIpc.handle('compact-conversation', (_e, conversationId: string) => compactConversation(conversationId))
+trustedIpc.handle('estimate-tokens', (_e, text: string) => estimateTokens(text))
+trustedIpc.handle('restart-app', () => restartRelay())
+trustedIpc.handle('get-agent-profiles', () => getAgentProfiles())
+trustedIpc.handle('save-agent-profile', (_e, profile) => saveAgentProfile(profile))
+trustedIpc.handle('delete-agent-profile', (_e, id: string) => deleteAgentProfile(id))
+trustedIpc.handle('get-agent-knowledge', (_e, agentId: string) => getAgentKnowledge(agentId))
+trustedIpc.handle('get-agent-runs', (_e, agentId: string) => getAgentRuns(agentId))
+trustedIpc.handle('run-agent-profile', (_e, input) => runAgentProfile(input))
+trustedIpc.handle('get-workflow-definitions', () => getWorkflowDefinitions())
+trustedIpc.handle('get-workflow-runs', () => getWorkflowRuns())
+trustedIpc.handle('start-workflow-run', (_e, workflowId: string, goal: string, workspaceId?: string) => startWorkflowRun(workflowId, goal, workspaceId))
+trustedIpc.handle('get-automation-catalog', () => getAutomationCatalog())
+trustedIpc.handle('get-scheduled-automations', () => getScheduledAutomations())
+trustedIpc.handle('create-scheduled-automation', (_e, input) => createScheduledAutomation(input))
+trustedIpc.handle('update-scheduled-automation', (_e, id: string, input) => updateScheduledAutomation(id, input))
+trustedIpc.handle('delete-scheduled-automation', (_e, id: string) => deleteScheduledAutomation(id))
+trustedIpc.handle('run-automation-now', (_e, id: string) => runAutomationNow(id))
+trustedIpc.handle('new-conversation', (_e, workspaceId?: string) => {
   const workspace = getWorkspaceById(workspaceId)
   return newConversation({
     workspaceId: workspace?.id,
@@ -440,51 +459,51 @@ ipcMain.handle('new-conversation', (_e, workspaceId?: string) => {
     preserveEmptyProject: workspace?.kind === 'general',
   })
 })
-ipcMain.handle('delete-conversation', (_e, id: string) => deleteConversation(id))
-ipcMain.handle('update-thread-status', (_e, id: string, status) => updateThreadStatus(id, status))
-ipcMain.handle('update-thread-resume-state', (_e, id: string, state) => updateThreadResumeState(id, state))
-ipcMain.handle('clone-imported-conversation', (_e, sourceId: string) => cloneImportedConversation(sourceId))
+trustedIpc.handle('delete-conversation', (_e, id: string) => deleteConversation(id))
+trustedIpc.handle('update-thread-status', (_e, id: string, status) => updateThreadStatus(id, status))
+trustedIpc.handle('update-thread-resume-state', (_e, id: string, state) => updateThreadResumeState(id, state))
+trustedIpc.handle('clone-imported-conversation', (_e, sourceId: string) => cloneImportedConversation(sourceId))
 
-ipcMain.handle('get-openai-auth-status', () => isOpenAIConnected())
-ipcMain.handle('start-openai-login', () => startLogin())
-ipcMain.handle('disconnect-openai', () => { clearCredentials(); resetModelCache() })
-ipcMain.handle('get-codex-model', () => getCodexModel())
-ipcMain.handle('set-codex-model', (_e, model: string) => saveCodexModel(model))
-ipcMain.handle('get-codex-models', () => listCodexModels())
-ipcMain.handle('get-codex-status', () => getCodexStatusSnapshot())
-ipcMain.handle('focus-codex-thread', (_e, threadId: string) => {
+trustedIpc.handle('get-openai-auth-status', () => isOpenAIConnected())
+trustedIpc.handle('start-openai-login', () => startLogin())
+trustedIpc.handle('disconnect-openai', () => { clearCredentials(); resetModelCache() })
+trustedIpc.handle('get-codex-model', () => getCodexModel())
+trustedIpc.handle('set-codex-model', (_e, model: string) => saveCodexModel(model))
+trustedIpc.handle('get-codex-models', () => listCodexModels())
+trustedIpc.handle('get-codex-status', () => getCodexStatusSnapshot())
+trustedIpc.handle('focus-codex-thread', (_e, threadId: string) => {
   focusCodexThreadById(threadId)
 })
 
-ipcMain.handle('get-gemini-key-status', () => isGeminiConnected())
-ipcMain.handle('set-gemini-key', (_e, key: string) => saveGeminiKey(key))
-ipcMain.handle('disconnect-gemini', () => clearGeminiCredentials())
-ipcMain.handle('get-gemini-model', () => getGeminiModel())
-ipcMain.handle('set-gemini-model', (_e, model: GeminiModel) => saveGeminiModel(model))
+trustedIpc.handle('get-gemini-key-status', () => isGeminiConnected())
+trustedIpc.handle('set-gemini-key', (_e, key: string) => saveGeminiKey(key))
+trustedIpc.handle('disconnect-gemini', () => clearGeminiCredentials())
+trustedIpc.handle('get-gemini-model', () => getGeminiModel())
+trustedIpc.handle('set-gemini-model', (_e, model: GeminiModel) => saveGeminiModel(model))
 
-ipcMain.handle('get-deepseek-key-status', () => isDeepSeekConnected())
-ipcMain.handle('set-deepseek-key', (_e, key: string) => saveDeepSeekKey(key))
-ipcMain.handle('disconnect-deepseek', () => clearDeepSeekCredentials())
-ipcMain.handle('get-deepseek-model', () => getDeepSeekModel())
-ipcMain.handle('set-deepseek-model', (_e, model: DeepSeekModel) => saveDeepSeekModel(model))
+trustedIpc.handle('get-deepseek-key-status', () => isDeepSeekConnected())
+trustedIpc.handle('set-deepseek-key', (_e, key: string) => saveDeepSeekKey(key))
+trustedIpc.handle('disconnect-deepseek', () => clearDeepSeekCredentials())
+trustedIpc.handle('get-deepseek-model', () => getDeepSeekModel())
+trustedIpc.handle('set-deepseek-model', (_e, model: DeepSeekModel) => saveDeepSeekModel(model))
 
-ipcMain.handle('get-ollama-status', () => {
+trustedIpc.handle('get-ollama-status', () => {
   const cfg = getOllamaConfig()
   return { configured: isOllamaConfigured(), model: cfg?.model, baseUrl: cfg?.baseUrl }
 })
-ipcMain.handle('set-ollama-config', (_e, baseUrl: string, model: string) => {
+trustedIpc.handle('set-ollama-config', (_e, baseUrl: string, model: string) => {
   saveOllamaConfig(baseUrl, model)
   ensureOllamaRunning().catch(() => {})
 })
-ipcMain.handle('disconnect-ollama', () => {
+trustedIpc.handle('disconnect-ollama', () => {
   disconnectOllama()
   stopOllamaProcess()
 })
-ipcMain.handle('check-ollama-reachable', () => checkOllamaReachable())
-ipcMain.handle('get-ollama-models', (_e, baseUrl?: string) => startAndGetModels(baseUrl))
-ipcMain.handle('pull-ollama-model', (_e, model: string, baseUrl?: string) => pullOllamaModel(model, baseUrl))
-ipcMain.handle('get-cursor-key-status', () => isCursorConnected())
-ipcMain.handle('set-cursor-key', async (_e, key: string) => {
+trustedIpc.handle('check-ollama-reachable', () => checkOllamaReachable())
+trustedIpc.handle('get-ollama-models', (_e, baseUrl?: string) => startAndGetModels(baseUrl))
+trustedIpc.handle('pull-ollama-model', (_e, model: string, baseUrl?: string) => pullOllamaModel(model, baseUrl))
+trustedIpc.handle('get-cursor-key-status', () => isCursorConnected())
+trustedIpc.handle('set-cursor-key', async (_e, key: string) => {
   saveCursorKey(key)
   try {
     await validateCursorKey(key)
@@ -493,10 +512,10 @@ ipcMain.handle('set-cursor-key', async (_e, key: string) => {
     throw error
   }
 })
-ipcMain.handle('disconnect-cursor', () => disconnectCursor())
-ipcMain.handle('get-cursor-model', () => getCursorModel())
-ipcMain.handle('set-cursor-model', (_e, model: string) => saveCursorModel(model))
-ipcMain.handle('get-cursor-models', () => listCursorModels())
+trustedIpc.handle('disconnect-cursor', () => disconnectCursor())
+trustedIpc.handle('get-cursor-model', () => getCursorModel())
+trustedIpc.handle('set-cursor-model', (_e, model: string) => saveCursorModel(model))
+trustedIpc.handle('get-cursor-models', () => listCursorModels())
 
 const activeControllers = new Map<string, AbortController>()
 const CODEX_CONVERSATION_REFRESH_MS = 4_000
@@ -520,7 +539,7 @@ function emitCodexStatusSnapshot(): void {
   updateTrayStatus(codexStatusSnapshot)
 }
 
-ipcMain.handle('send-message', (_e, conversationId: string, content: string, modelChoice: string, options) => {
+trustedIpc.handle('send-message', (_e, conversationId: string, content: string, modelChoice: string, options) => {
   // Cancel any in-flight request for this conversation before starting a new one
   activeControllers.get(conversationId)?.abort()
   const controller = new AbortController()
@@ -544,7 +563,7 @@ ipcMain.handle('send-message', (_e, conversationId: string, content: string, mod
   }, options)
 })
 
-ipcMain.handle('cancel-message', (_e, conversationId: string) => {
+trustedIpc.handle('cancel-message', (_e, conversationId: string) => {
   activeControllers.get(conversationId)?.abort()
   activeControllers.delete(conversationId)
 })
@@ -988,7 +1007,7 @@ function appendTerminalOutput(id: string, data: string) {
   return session.outputSequence
 }
 
-ipcMain.handle('select-directory', async () => {
+trustedIpc.handle('select-directory', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     properties: ['openDirectory', 'createDirectory'],
     buttonLabel: 'Select Folder',
@@ -996,14 +1015,14 @@ ipcMain.handle('select-directory', async () => {
   return canceled ? null : filePaths[0]
 })
 
-ipcMain.handle('terminal-list', () => terminalSnapshots())
+trustedIpc.handle('terminal-list', () => terminalSnapshots())
 
-ipcMain.handle('terminal-buffer', (_e, id: string) => {
+trustedIpc.handle('terminal-buffer', (_e, id: string) => {
   const session = terminalSessions.get(id)
   return { output: session?.output ?? '', sequence: session?.outputSequence ?? 0 }
 })
 
-ipcMain.handle('terminal-agent-run', (_e, id: string) => agentRunForTerminal(id))
+trustedIpc.handle('terminal-agent-run', (_e, id: string) => agentRunForTerminal(id))
 
 function createTerminalSession(id: string, launcherId: TerminalLauncherId, name: string, cwd?: string, taskId?: string, workspaceId?: string): TerminalSessionSnapshot {
   const existing = terminalSessions.get(id)
@@ -1102,7 +1121,7 @@ function riskyTerminalInput(data: string): string | null {
   return null
 }
 
-ipcMain.handle('terminal-create', (_e, id: string, launcherId: TerminalLauncherId, name: string, cwd?: string, taskId?: string, workspaceId?: string) => {
+trustedIpc.handle('terminal-create', (_e, id: string, launcherId: TerminalLauncherId, name: string, cwd?: string, taskId?: string, workspaceId?: string) => {
   const selectedWorkspace = getWorkspaceById(workspaceId)
   const inferredWorkspaceId = selectedWorkspace?.kind === 'repo'
     ? selectedWorkspace.id
@@ -1114,7 +1133,7 @@ ipcMain.handle('terminal-create', (_e, id: string, launcherId: TerminalLauncherI
   return session
 })
 
-ipcMain.on('terminal-input', (_e, id: string, data: string) => {
+trustedIpc.on('terminal-input', (_e, id: string, data: string) => {
   const riskyAction = riskyTerminalInput(data)
   if (riskyAction) {
     const attempt = findExperimentAttemptForTerminal(id)
@@ -1140,11 +1159,11 @@ ipcMain.on('terminal-input', (_e, id: string, data: string) => {
   proc.write(data)
 })
 
-ipcMain.on('terminal-resize', (_e, id: string, cols: number, rows: number) => {
+trustedIpc.on('terminal-resize', (_e, id: string, cols: number, rows: number) => {
   ptyProcesses.get(id)?.resize(cols, rows)
 })
 
-ipcMain.handle('terminal-kill', (_e, id: string) => {
+trustedIpc.handle('terminal-kill', (_e, id: string) => {
   try { ptyProcesses.get(id)?.kill() } catch { /* already dead */ }
   ptyProcesses.delete(id)
   terminalSessions.delete(id)
@@ -1161,7 +1180,7 @@ app.whenReady().then(() => {
   if (process.platform === 'darwin') {
     const dockIconPath = path.join(app.getAppPath(), 'build', 'icon', 'icon_1024.png')
     if (fs.existsSync(dockIconPath)) {
-      app.dock.setIcon(dockIconPath)
+      app.dock?.setIcon(dockIconPath)
     }
   }
   createApplicationMenu()
