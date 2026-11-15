@@ -176,7 +176,7 @@ Relay resume context:
 
 Workspace:
 - Project: relay
-- Path: /Users/michael/Documents/GitHub/relay
+- Path: /Users/michael/GitHub/relay
 - Branch at last update: codex/workspace-continuity
 - Commit at last update: c471871
 
