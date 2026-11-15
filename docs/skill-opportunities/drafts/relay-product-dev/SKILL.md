@@ -21,7 +21,7 @@ description: Use when the user asks for relay product development or gives a pro
 - Representative prompts:
   - How might we visualize how sub agents work relative to the main agent, while a terminal is working? I tried to use Gemini CLI and the moment it created sub agents the CLI became basically un-usable. How can we fix this in Relay?
   - # Files mentioned by the user: ## Screenshot 2026-05-17 at 11.51.21 AM.png: /Users/michael/Desktop/Screenshot 2026-05-17 at 11.51.21 AM.png ## My request for Codex: I think the UI we're using right now is pretty weak to create new agents - let's learn from wha
-  - Project: ~/Documents/GitHub/mobbin-library — a TypeScript/SQLite cache for Mobbin UI screens with a Google Drive image sync. What's built: src/drive.ts handles OAuth + image upload to Drive. src/cli.ts has a drive-upload command that uploads images for screens
+  - Project: ~/GitHub/mobbin-library — a TypeScript/SQLite cache for Mobbin UI screens with a Google Drive image sync. What's built: src/drive.ts handles OAuth + image upload to Drive. src/cli.ts has a drive-upload command that uploads images for screens
   - The app can be pretty slow to type into this nested terminal - much slower than typing into an active terminal. Why is it different
 
 ## Refinement Notes
