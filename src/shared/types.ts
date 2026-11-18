@@ -257,6 +257,16 @@ export interface Conversation {
 export type TerminalLauncherId = 'codex' | 'claude' | 'gemini' | 'deepseek' | 'cursor' | 'local' | 'shell'
 export type TerminalSessionStatus = 'running' | 'exited'
 
+export type DispatchAgent = TerminalLauncherId | 'workflow'
+
+export interface DispatchRecommendation {
+  taskId: string
+  agent: DispatchAgent
+  agentLabel: string
+  reason: string
+  launchPrompt: string
+}
+
 export interface ExternalConversationLink {
   terminalSessionId?: string
   terminalName?: string
@@ -812,6 +822,8 @@ export interface ChatApi {
   updateExperimentAttempt: (id: string, input: ExperimentAttemptUpdateInput) => Promise<ExperimentAttempt | null>
   linkAttemptEvidence: (attemptId: string, links: ExperimentEvidenceLinks) => Promise<ExperimentAttempt | null>
   generateExperimentPostmortem: (experimentId: string, input?: ExperimentPostmortemInput) => Promise<ExperimentPostmortem>
+  getDispatchRecommendation: (taskId: string) => Promise<DispatchRecommendation>
+  dispatchTask: (taskId: string, rec: DispatchRecommendation) => Promise<{ kind: 'terminal'; sessionId: string; sessionName: string } | { kind: 'workflow'; workflowName: string }>
   sendMessage: (conversationId: string, content: string, modelChoice: ModelChoice, options?: SendMessageOptions) => Promise<void>
   newConversation: (workspaceId?: string) => Promise<Conversation>
   deleteConversation: (id: string) => Promise<void>
